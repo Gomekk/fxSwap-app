@@ -494,7 +494,7 @@ function viewSettingsBasic(){
     PAIRS.forEach(pr => {
       const cur = settingFor(b, pr);
       html += `<tr><td style="text-align:left">${esc(pr)}</td>
-        <td><input class="fld-lot" data-broker="${esc(b)}" data-pair="${esc(pr)}" inputmode="numeric" placeholder="例:10000" value="${cur && cur.lotSize ? num(cur.lotSize).toLocaleString('ja-JP') : ''}" style="${inputStyle(80,'center')}"><span style="margin-left:4px;font-size:12px;color:var(--ink-2)">通貨</span></td>
+       <td><input class="fld-lot" data-broker="${esc(b)}" data-pair="${esc(pr)}" inputmode="numeric" placeholder="例:10,000" value="${cur && cur.lotSize ? num(cur.lotSize).toLocaleString('ja-JP') : ''}" style="${inputStyle(80,'center')}"><span style="margin-left:4px;font-size:12px;color:var(--ink-2)">通貨</span></td>
         <td><input class="fld-maxpos" data-broker="${esc(b)}" data-pair="${esc(pr)}" inputmode="numeric" placeholder="例:50" value="${cur && cur.maxPosition ? num(cur.maxPosition).toLocaleString('ja-JP') : ''}" style="${inputStyle(80)}"><span style="margin-left:4px;font-size:12px;color:var(--ink-2)">${capUnit}</span></td>
       </tr>`;
     });
@@ -640,17 +640,29 @@ $("#csvIn").onchange = async e => {
     await save("weeks", null, {date, equity:num(eq), principal:num(pr), daily:num(daily), brokers:{}, memo:""});
     n++;
   }
-  e.target.value = "";
+    e.target.value = "";
   closeSheet(); toast(n ? `${n}週分を取り込みました` : "取り込める行がありませんでした");
 };
 
 document.querySelectorAll("nav.tabs button").forEach(b => b.onclick = () => { tab = b.dataset.tab; render(); window.scrollTo(0,0); });
 let rw = window.innerWidth;
 window.addEventListener("resize", () => { if ((rw < 600) !== (window.innerWidth < 600)){ rw = window.innerWidth; render(); } });
+document.addEventListener("keydown", e => {
+  if (e.key !== "Enter") return;
+  const t = e.target;
+  if (t.tagName !== "INPUT" || t.closest("#loginForm")) return;
+  e.preventDefault();
+  const scope = t.closest("#sheetIn") || t.closest("#view") || document;
+  const fields = [...scope.querySelectorAll("input, select")].filter(el => !el.disabled && el.type !== "hidden" && el.offsetParent !== null);
+  const i = fields.indexOf(t);
+  if (i > -1 && i < fields.length - 1) fields[i+1].focus();
+  else t.blur();
+});
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("./sw.js").catch(() => {});
 render();
 boot();
 })();
+
 </script>
 </body>
 </html>
