@@ -121,7 +121,7 @@ table.sum tfoot td{border-top:1px solid var(--ink);font-weight:700}
 .empty .btn{margin-top:10px}
 
 nav.tabs{position:fixed;left:0;right:0;bottom:0;background:var(--paper);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom,0px);z-index:10}
-nav.tabs .in{max-width:720px;margin:0 auto;display:grid;grid-template-columns:repeat(4,1fr)}
+nav.tabs .in{max-width:720px;margin:0 auto;display:grid;grid-template-columns:repeat(5,1fr)}
 nav.tabs button{background:none;border:0;padding:12px 0 10px;font-size:13px;color:var(--ink-3);font-weight:500;border-top:2px solid transparent;margin-top:-1px}
 nav.tabs button[aria-selected="true"]{color:var(--ink);font-weight:700;border-top-color:var(--ink)}
 
@@ -168,6 +168,7 @@ nav.tabs button[aria-selected="true"]{color:var(--ink);font-weight:700;border-to
   <button role="tab" data-tab="hold" aria-selected="false">保有</button>
   <button role="tab" data-tab="closed" aria-selected="false">決済</button>
   <button role="tab" data-tab="cash" aria-selected="false">入出金</button>
+  <button role="tab" data-tab="settings" aria-selected="false">設定</button>
 </div></nav>
 <div class="scrim" id="scrim"></div>
 <div class="sheet" id="sheet" role="dialog" aria-modal="true"><div class="in" id="sheetIn"></div></div>
@@ -183,8 +184,8 @@ const SUPABASE_KEY = "sb_publishable_sj2rETV0MdsP1hA56C70kQ_F5eS1Via";
 
 const BROKERS = ["外為どっとコム","GMOクリック証券","みんなのFX","トライオートFX"];
 const PAIRS = ["TRY/JPY","MXN/JPY","ZAR/JPY","HUF/JPY","PLN/JPY","CHF/MXN","CHF/TRY","CHF/ZAR"];
-const COLS = ["weeks","positions","closed","cash"];
-const state = {weeks:[],positions:[],closed:[],cash:[]};
+const COLS = ["weeks","positions","closed","cash","settings"];
+const state = {weeks:[],positions:[],closed:[],cash:[],settings:[]};
 let ready = false, authKnown = false, session = null, tab = "trend";
 
 /* ---------- helpers ---------- */
@@ -205,11 +206,12 @@ const weeksSorted = () => [...state.weeks].sort((a,b) => a.date < b.date ? -1 : 
 const monthly = w => w.monthly != null ? w.monthly : w.daily * 30;
 const yearly = w => w.yearly != null ? w.yearly : w.daily * 365;
 const cashPrincipal = () => state.cash.reduce((s,c) => s + (c.kind === "out" ? -1 : 1) * num(c.amount), 0);
+const lotSize = broker => { const s = state.settings.find(x => x.broker === broker); return s && num(s.lotSize) > 0 ? num(s.lotSize) : null; };
 
 /* ---------- Supabase ---------- */
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-const TABLE = {weeks:"weeks", positions:"positions", closed:"closed_positions", cash:"cash_flows"};
-const NUMS = new Set(["equity","principal","daily","units","swap","margin","fxPl","swapTotal","amount"]);
+const TABLE = {weeks:"weeks", positions:"positions", closed:"closed_positions", cash:"cash_flows", settings:"settings"};
+const NUMS = new Set(["equity","principal","daily","units","swap","margin","fxPl","swapTotal","amount","lots","lotSize"]);
 const toSnake = k => k.replace(/[A-Z]/g, m => "_" + m.toLowerCase());
 const toCamel = k => k.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
 const fromRow = r => { const o = {}; for (const k in r){ const c = toCamel(k); o[c] = NUMS.has(c) && r[k] != null ? Number(r[k]) : r[k]; } return o; };
@@ -227,11 +229,12 @@ async function loadAll(){
   if ($("#status").textContent === "読み込み中…") $("#status").textContent = "";
   render();
 }
-/* id なし＝新規。weeks は同じ日付なら上書き */
+/* id なし＝新規。weeks・settings は key が同じなら上書き */
 async function save(col, id, data){
   const row = toRow(data); row.user_id = session.user.id;
   let q;
   if (col === "weeks" && !id) q = sb.from("weeks").upsert(row, { onConflict: "user_id,date" });
+  else if (col === "settings" && !id) q = sb.from("settings").upsert(row, { onConflict: "user_id,broker" });
   else if (id) q = sb.from(TABLE[col]).update(row).eq("id", id);
   else q = sb.from(TABLE[col]).insert(row);
   const { error } = await q;
@@ -304,7 +307,7 @@ function render(){
   if (!session){ $("#view").innerHTML = viewLogin(); bindLogin(); return; }
   document.querySelectorAll("nav.tabs button").forEach(b => b.setAttribute("aria-selected", b.dataset.tab === tab));
   const v = $("#view");
-  v.innerHTML = tab === "trend" ? viewTrend() : tab === "hold" ? viewHold() : tab === "closed" ? viewClosed() : viewCash();
+  v.innerHTML = tab === "trend" ? viewTrend() : tab === "hold" ? viewHold() : tab === "closed" ? viewClosed() : tab === "cash" ? viewCash() : viewSettings();
   bindView();
 }
 
@@ -449,6 +452,18 @@ function viewCash(){
   return html + `</ul></section>`;
 }
 
+function viewSettings(){
+  let html = `<section><h2>設定</h2></section>
+    <p class="hint">証券会社ごとに「1 Lot＝何通貨」かを登録しておくと、ポジション追加でLot数を入れるだけで数量が自動計算されます。</p>
+    <div class="tablebox"><table class="sum" style="width:100%"><thead><tr><th style="text-align:left">証券会社</th><th>1 Lotの通貨数</th></tr></thead><tbody>`;
+  BROKERS.forEach(b => {
+    const cur = state.settings.find(x => x.broker === b);
+    html += `<tr><td>${esc(b)}</td><td><input data-lot="${esc(b)}" inputmode="numeric" placeholder="例: 10,000" value="${cur ? num(cur.lotSize).toLocaleString('ja-JP') : ''}" style="width:100%;max-width:140px;padding:7px 9px;border:1px solid var(--line);border-radius:6px;background:var(--card);font-size:15px;text-align:right"></td></tr>`;
+  });
+  html += `</tbody></table></div>`;
+  return html;
+}
+
 function bindView(){
   const v = $("#view");
   v.querySelectorAll("[data-act]").forEach(b => b.onclick = () => ({record:()=>openWeek(), addPos:()=>openPos(), addClosed:()=>openClosed(), addCash:()=>openCash(), csv:openCsv})[b.dataset.act]());
@@ -456,6 +471,10 @@ function bindView(){
   v.querySelectorAll("[data-edit-pos]").forEach(b => b.onclick = () => openPos(state.positions.find(w=>w.id===b.dataset.editPos)));
   v.querySelectorAll("[data-edit-closed]").forEach(b => b.onclick = () => openClosed(state.closed.find(w=>w.id===b.dataset.editClosed)));
   v.querySelectorAll("[data-edit-cash]").forEach(b => b.onclick = () => openCash(state.cash.find(w=>w.id===b.dataset.editCash)));
+  v.querySelectorAll("[data-lot]").forEach(i => {
+    i.oninput = () => { const d = i.value.replace(/[^\d]/g,""); i.value = d ? Number(d).toLocaleString("ja-JP") : ""; };
+    i.onchange = async () => { if (await save("settings", null, {broker:i.dataset.lot, lotSize:num(i.value)})) toast("保存しました"); };
+  });
 }
 
 /* ---------- sheet ---------- */
@@ -534,23 +553,32 @@ function openPos(p){
   openSheet(p ? "ポジションを編集" : "ポジションを追加", `
     <div class="two">${select("証券会社","broker",p?p.broker:"",BROKERS)}${select("通貨ペア","pair",p?p.pair:"",PAIRS)}</div>
     <div class="f"><span>売買</span>${seg("side", p ? p.side : "buy", [["buy","買い"],["sell","売り"]])}</div>
-    <div class="two">${field("数量（通貨）","units",p&&p.units?num(p.units).toLocaleString("ja-JP"):"","text",'inputmode="numeric"')}${field("建値","rate",p?p.rate:"","text",'inputmode="decimal"')}</div>
+    <div class="two">${field("Lot数","lots",p?p.lots:"","text",'inputmode="decimal"')}<label class="f"><span>数量（通貨）</span><div id="unitsCalc" style="padding:10px 12px;border:1px solid var(--line);border-radius:6px;background:var(--paper-2);font-weight:700">—</div></label></div>
+    ${field("建値","rate",p?p.rate:"","text",'inputmode="decimal"')}
     ${field("建玉日","openDate",p?p.openDate:today(),"date")}
     ${p ? `<button class="linkbtn" data-toclosed>このポジションを決済済みにする</button>` : ""}
     ${actions(!!p)}`);
   const s = $("#sheetIn");
-  const unitsInput = s.querySelector('[name="units"]');
-  unitsInput.oninput = () => { const digits = unitsInput.value.replace(/[^\d]/g,""); unitsInput.value = digits ? Number(digits).toLocaleString("ja-JP") : ""; };
+  const recalc = () => {
+    const v = formVals(), ls = lotSize(v.broker), lots = num(v.lots);
+    const u = ls && lots ? lots * ls : null;
+    s.querySelector("#unitsCalc").textContent = u ? u.toLocaleString("ja-JP") + "通貨" : (v.broker ? "設定タブでLotサイズを登録してください" : "証券会社を選んでください");
+    return u;
+  };
+  s.addEventListener("input", recalc); s.addEventListener("change", recalc); recalc();
   const tc = s.querySelector("[data-toclosed]");
   if (tc) tc.onclick = () => { closeSheet(); setTimeout(() => openClosed(null, p), 250); };
   wire(async () => {
     const v = formVals();
     if (!v.broker || !v.pair){ toast("証券会社と通貨ペアを選んでください"); return; }
-    if (!num(v.units)){ toast("数量を入力してください"); return; }
-    if (!(await save("positions", p ? p.id : null, {broker:v.broker, pair:v.pair, side:v.side, units:num(v.units), rate:v.rate, openDate:v.openDate}))) return;
+    const units = recalc();
+    if (!num(v.lots)){ toast("Lot数を入力してください"); return; }
+    if (!units){ toast("先に設定タブでLotサイズを登録してください"); return; }
+    if (!(await save("positions", p ? p.id : null, {broker:v.broker, pair:v.pair, side:v.side, lots:num(v.lots), units, rate:v.rate, openDate:v.openDate}))) return;
     closeSheet(); toast("保存しました");
   }, () => removeDoc("positions", p.id));
 }
+
 
 function openClosed(c, fromPos){
   const src = c || (fromPos ? {broker:fromPos.broker,pair:fromPos.pair,units:fromPos.units,openRate:fromPos.rate,openDate:fromPos.openDate,closeDate:today()} : null);
@@ -622,19 +650,7 @@ $("#csvIn").onchange = async e => {
 document.querySelectorAll("nav.tabs button").forEach(b => b.onclick = () => { tab = b.dataset.tab; render(); window.scrollTo(0,0); });
 let rw = window.innerWidth;
 window.addEventListener("resize", () => { if ((rw < 600) !== (window.innerWidth < 600)){ rw = window.innerWidth; render(); } });
-if ("serviceWorker" in navigator){
-  navigator.serviceWorker.register("./sw.js").then(reg => {
-    reg.update();
-    reg.addEventListener("updatefound", () => {
-      const nw = reg.installing;
-      if (nw) nw.addEventListener("statechange", () => {
-        if (nw.state === "activated" && navigator.serviceWorker.controller) location.reload();
-      });
-    });
-  }).catch(() => {});
-  let reloaded = false;
-  navigator.serviceWorker.addEventListener("controllerchange", () => { if (!reloaded){ reloaded = true; location.reload(); } });
-}
+if ("serviceWorker" in navigator) navigator.serviceWorker.register("./sw.js").catch(() => {});
 render();
 boot();
 })();
