@@ -56,7 +56,6 @@ header.top{display:flex;align-items:baseline;justify-content:space-between;paddi
 header.top h1{font-family:var(--serif);font-weight:800;font-size:22px;letter-spacing:.08em;margin:0}
 .status{font-size:12px;color:var(--ink-3)}
 
-/* hero: the guilloché certificate */
 .cert{position:relative;margin:10px 0 18px;padding:26px 20px 20px;border:1px solid var(--ink);border-radius:4px;background:var(--card);overflow:hidden}
 .cert::before{content:"";position:absolute;inset:5px;border:1px solid var(--line);border-radius:2px;pointer-events:none}
 .cert svg.rosette{position:absolute;right:-120px;top:-110px;width:330px;height:330px;opacity:.4;pointer-events:none}
@@ -131,7 +130,6 @@ nav.tabs .in{max-width:720px;margin:0 auto;display:grid;grid-template-columns:re
 nav.tabs button{background:none;border:0;padding:12px 0 10px;font-size:13px;color:var(--ink-3);font-weight:500;border-top:2px solid transparent;margin-top:-1px}
 nav.tabs button[aria-selected="true"]{color:var(--ink);font-weight:700;border-top-color:var(--ink)}
 
-/* sheet */
 .scrim{position:fixed;inset:0;background:var(--overlay);display:none;z-index:20}
 .scrim.open{display:block}
 .sheet{position:fixed;left:0;right:0;bottom:0;max-height:92%;overflow:auto;background:var(--paper);border-radius:14px 14px 0 0;z-index:21;transform:translateY(105%);transition:transform .22s ease;padding:0 0 env(safe-area-inset-bottom,0px)}
@@ -154,9 +152,6 @@ nav.tabs button[aria-selected="true"]{color:var(--ink);font-weight:700;border-to
 .x{background:none;border:0;color:var(--ink-3);font-size:18px;padding:4px 6px}
 .actions{display:flex;gap:10px;justify-content:space-between;margin-top:18px}
 .actions .right{display:flex;gap:10px;margin-left:auto}
-.shot{margin:0 0 16px;padding:12px 14px;border:1px dashed var(--violet);border-radius:6px;font-size:13px;color:var(--ink-2)}
-.shot label{color:var(--violet);font-weight:700;cursor:pointer}
-.shot input{display:none}
 .toast{position:fixed;left:50%;bottom:84px;transform:translateX(-50%);background:var(--ink);color:var(--paper);padding:8px 16px;border-radius:999px;font-size:13px;z-index:30;opacity:0;transition:opacity .2s;pointer-events:none}
 .toast.show{opacity:1}
 [hidden]{display:none!important}
@@ -184,7 +179,6 @@ nav.tabs button[aria-selected="true"]{color:var(--ink);font-weight:700;border-to
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <script>
 (() => {
-/* ===== Supabaseの接続情報（項番2で控えた値） ===== */
 const SUPABASE_URL = "https://mspzgfkommmuucjvdvbm.supabase.co";
 const SUPABASE_KEY = "sb_publishable_sj2rETV0MdsP1hA56C70kQ_F5eS1Via";
 
@@ -201,7 +195,6 @@ const COLS = ["weeks","positions","closed","cash","settings"];
 const state = {weeks:[],positions:[],closed:[],cash:[],settings:[]};
 let ready = false, authKnown = false, session = null, tab = "trend";
 
-/* ---------- helpers ---------- */
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const num = v => { if (v === "" || v == null) return 0; const n = Number(String(v).replace(/[¥,\s円]/g,"")); return isFinite(n) ? n : 0; };
@@ -235,7 +228,6 @@ const minViolation = (broker, lots, units) => {
 };
 const inputStyle = (w, align="right") => `width:100%;max-width:${w}px;padding:6px 8px;border:1px solid var(--line);border-radius:6px;background:var(--card);font-size:14px;text-align:${align}`;
 
-/* ---------- Supabase ---------- */
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 const TABLE = {weeks:"weeks", positions:"positions", closed:"closed_positions", cash:"cash_flows", settings:"settings"};
 const NUMS = new Set(["equity","principal","daily","units","swap","margin","fxPl","swapTotal","amount","lots","lotSize","minLot","maxPosition"]);
@@ -256,7 +248,6 @@ async function loadAll(){
   if ($("#status").textContent === "読み込み中…") $("#status").textContent = "";
   render();
 }
-/* id なし＝新規。weeks・settings は key が同じなら上書き */
 async function saveSetting(broker, pair, patch){
   const row = toRow({broker, pair, ...patch}); row.user_id = session.user.id;
   const { error } = await sb.from("settings").upsert(row, { onConflict: "user_id,broker,pair" });
@@ -267,7 +258,6 @@ async function saveSetting(broker, pair, patch){
   return true;
 }
 async function save(col, id, data){
-
   const row = toRow(data); row.user_id = session.user.id;
   let q;
   if (col === "weeks" && !id) q = sb.from("weeks").upsert(row, { onConflict: "user_id,date" });
@@ -316,7 +306,6 @@ function bindLogin(){
   };
 }
 
-/* ---------- guilloché rosette ---------- */
 function rosette(){
   const R = 150, paths = [];
   const specs = [[96,-7,58,"var(--violet)"],[88,-11,46,"var(--ink)"],[70,-5,40,"var(--gold)"],[118,-13,24,"var(--violet)"]];
@@ -338,7 +327,6 @@ function rosette(){
   return `<svg class="rosette" viewBox="0 0 300 300" aria-hidden="true">${paths.join("")}</svg>`;
 }
 
-/* ---------- views ---------- */
 function render(){
   if (!authKnown || (session && !ready)){ $("#view").innerHTML = `<p class="hint" style="padding:40px 0;text-align:center">読み込み中…</p>`; return; }
   if (!session){ $("#view").innerHTML = viewLogin(); bindLogin(); return; }
@@ -446,7 +434,6 @@ function viewHold(){
   return html + `</section>`;
 }
 
-
 function viewClosed(){
   const cs = [...state.closed].sort((a,b) => (b.closeDate||"").localeCompare(a.closeDate||""));
   let html = `<section><h2>通貨ペア別の実現損益<span class="act"><button class="linkbtn" data-act="addClosed">＋ 決済を追加</button></span></h2>`;
@@ -490,7 +477,7 @@ function viewCash(){
   return html + `</ul></section>`;
 }
 
-let settingsView = null; // null=一覧、"basic"=基本情報の画面
+let settingsView = null;
 function viewSettings(){
   if (settingsView === "basic") return viewSettingsBasic();
   return `<section><h2>設定</h2>
@@ -507,7 +494,7 @@ function viewSettingsBasic(){
     const capUnit = MAXPOS_UNIT[b] || "lot";
     html += `<div class="broker"><span>${esc(b)}</span><span style="font-weight:500;font-size:12px">最小取引単位: <input class="fld-minlot" data-broker="${esc(b)}" inputmode="decimal" placeholder="${minUnitLabel(b) === '万通貨' ? '1' : '0.1'}" value="${minRow && minRow.minLot != null ? minRow.minLot : ''}" style="width:52px;padding:3px 5px;border:1px solid var(--line);border-radius:4px;background:var(--card);font-size:12px;text-align:center">${minUnitLabel(b)}</span></div>
       <div class="tablebox"><table class="sum" style="width:100%"><thead><tr><th style="text-align:left">通貨ペア</th><th>取引単位(1lot=)</th><th>建玉上限</th></tr></thead><tbody>`;
-        pairsFor(b).forEach(pr => {
+    pairsFor(b).forEach(pr => {
       const cur = settingFor(b, pr);
       html += `<tr><td style="text-align:left">${esc(pr)}</td>
        <td><input class="fld-lot" data-broker="${esc(b)}" data-pair="${esc(pr)}" inputmode="numeric" placeholder="例:10,000" value="${cur && cur.lotSize ? num(cur.lotSize).toLocaleString('ja-JP') : ''}" style="${inputStyle(80,'center')}"><span style="margin-left:4px;font-size:12px;color:var(--ink-2)">通貨</span></td>
@@ -539,8 +526,6 @@ function bindView(){
     i.oninput = () => { i.value = i.value.replace(/[^\d]/g,""); };
     i.onblur = () => { const n2 = num(i.value); i.value = n2 ? n2.toLocaleString("ja-JP") : ""; saveSetting(i.dataset.broker, i.dataset.pair, {maxPosition:n2}); };
   });
-
-
 }
 
 /* ---------- sheet ---------- */
@@ -610,8 +595,10 @@ function openWeek(w){
     const doc = {date:v.date, equity:num(v.equity), principal:num(v.principal), daily:num(v.daily), brokers:bClean, memo:v.memo};
     if (w && w.date !== v.date) await removeDoc("weeks", w.id);
     if (await save("weeks", w && w.date === v.date ? w.id : null, doc)){ closeSheet(); toast("記録しました"); }
-  }, () => remov
+  }, () => removeDoc("weeks", w.id));
+}
 
+function openPos(p){
   openSheet(p ? "ポジションを編集" : "ポジションを追加", `
     <div class="two">${select("証券会社","broker",p?p.broker:"",BROKERS)}${select("通貨ペア","pair",p?p.pair:"",pairsFor(p?p.broker:""))}</div>
     <div class="f"><span>売買</span>${seg("side", p ? p.side : "buy", [["buy","買い"],["sell","売り"]])}</div>
@@ -627,8 +614,7 @@ function openWeek(w){
     const opts = pairsFor(e.target.value);
     pairSel.innerHTML = `<option value="" selected disabled>選択してください</option>` + opts.map(o => `<option>${esc(o)}</option>`).join("");
   });
-
-    const recalc = () => {
+  const recalc = () => {
     const v = formVals(), ls = lotSize(v.broker, v.pair), lots = num(v.lots), min = minLotOf(v.broker);
     const u = ls && lots ? lots * ls : null;
     s.querySelector("#unitsCalc").textContent = !v.broker || !v.pair ? "証券会社と通貨ペアを選んでください" : !ls ? "設定タブで取引単位を登録してください" : !lots ? "—" : u.toLocaleString("ja-JP") + "通貨";
@@ -665,7 +651,6 @@ function openWeek(w){
   }, () => removeDoc("positions", p.id));
 }
 
-
 function openClosed(c, fromPos){
   const src = c || (fromPos ? {broker:fromPos.broker,pair:fromPos.pair,units:fromPos.units,openRate:fromPos.rate,openDate:fromPos.openDate,closeDate:today()} : null);
   openSheet(c ? "決済を編集" : "決済を追加", `
@@ -674,7 +659,7 @@ function openClosed(c, fromPos){
     <div class="two">${field("建玉日","openDate",src?src.openDate:"","date")}${field("決済日","closeDate",src?src.closeDate:today(),"date")}</div>
     <div class="two">${field("建玉レート","openRate",src?src.openRate:"","text",'inputmode="decimal"')}${field("決済レート","closeRate",src?src.closeRate:"","text",'inputmode="decimal"')}</div>
     <div class="two">${field("為替損益（円）","fxPl",src?src.fxPl:"","text",'inputmode="decimal"')}${field("累計スワップ（円）","swapTotal",src?src.swapTotal:"","text",'inputmode="decimal"')}</div>
-        ${fromPos ? `<p class="hint">保存すると保有ポジションから外れます。</p>` : ""}
+    ${fromPos ? `<p class="hint">保存すると保有ポジションから外れます。</p>` : ""}
     ${actions(!!c)}`);
   $("#sheetIn").querySelector('[name="broker"]').addEventListener("change", e => {
     const pairSel = $("#sheetIn").querySelector('[name="pair"]');
@@ -682,7 +667,6 @@ function openClosed(c, fromPos){
     pairSel.innerHTML = `<option value="" selected disabled>選択してください</option>` + opts.map(o => `<option>${esc(o)}</option>`).join("");
   });
   wire(async () => {
-
     const v = formVals();
     if (!(await save("closed", c ? c.id : null, {broker:v.broker, pair:v.pair, units:num(v.units), openDate:v.openDate, closeDate:v.closeDate, openRate:v.openRate, closeRate:v.closeRate, fxPl:num(v.fxPl), swapTotal:num(v.swapTotal)}))) return;
     if (fromPos) await removeDoc("positions", fromPos.id);
@@ -705,7 +689,6 @@ function openCash(c){
   }, () => removeDoc("cash", c.id));
 }
 
-/* CSV import / export of weekly records */
 function openCsv(){
   openSheet("週ごとの記録のCSV", `
     <p class="hint">Numbersの表を「書き出す → CSV」で保存すると、過去の記録をまとめて取り込めます。1行目は見出しで、列の順番は次のとおりです。</p>
@@ -735,7 +718,7 @@ $("#csvIn").onchange = async e => {
     await save("weeks", null, {date, equity:num(eq), principal:num(pr), daily:num(daily), brokers:{}, memo:""});
     n++;
   }
-    e.target.value = "";
+  e.target.value = "";
   closeSheet(); toast(n ? `${n}週分を取り込みました` : "取り込める行がありませんでした");
 };
 
@@ -754,12 +737,10 @@ document.addEventListener("keydown", e => {
   if (i > -1 && i < fields.length - 1) fields[i+1].focus();
   else t.blur();
 });
-
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("./sw.js").catch(() => {});
 render();
 boot();
 })();
-
 </script>
 </body>
 </html>
