@@ -653,11 +653,13 @@ document.addEventListener("keydown", e => {
   if (t.tagName !== "INPUT" || t.closest("#loginForm")) return;
   e.preventDefault();
   const scope = t.closest("#sheetIn") || t.closest("#view") || document;
-  const fields = [...scope.querySelectorAll("input, select")].filter(el => !el.disabled && el.type !== "hidden" && el.offsetParent !== null);
+  const col = [...t.classList].find(c => c.startsWith("fld-"));
+  const fields = [...scope.querySelectorAll(col ? "." + col : "input, select")].filter(el => !el.disabled && el.type !== "hidden" && el.offsetParent !== null);
   const i = fields.indexOf(t);
   if (i > -1 && i < fields.length - 1) fields[i+1].focus();
   else t.blur();
 });
+
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("./sw.js").catch(() => {});
 render();
 boot();
