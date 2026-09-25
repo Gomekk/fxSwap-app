@@ -242,7 +242,17 @@ async function loadAll(){
   render();
 }
 /* id なし＝新規。weeks・settings は key が同じなら上書き */
+async function saveSetting(broker, pair, patch){
+  const row = toRow({broker, pair, ...patch}); row.user_id = session.user.id;
+  const { error } = await sb.from("settings").upsert(row, { onConflict: "user_id,broker,pair" });
+  if (error){ toast("保存できませんでした：" + error.message); return false; }
+  const s = state.settings.find(x => x.broker === broker && x.pair === pair);
+  if (s) Object.assign(s, patch); else state.settings.push({id:null, broker, pair, ...patch});
+  toast("保存しました");
+  return true;
+}
 async function save(col, id, data){
+
   const row = toRow(data); row.user_id = session.user.id;
   let q;
   if (col === "weeks" && !id) q = sb.from("weeks").upsert(row, { onConflict: "user_id,date" });
@@ -502,17 +512,18 @@ function bindView(){
   v.querySelectorAll("[data-edit-cash]").forEach(b => b.onclick = () => openCash(state.cash.find(w=>w.id===b.dataset.editCash)));
   v.querySelectorAll("[data-panel]").forEach(b => b.onclick = () => { settingsView = b.dataset.panel; render(); });
   v.querySelectorAll("[data-back]").forEach(b => b.onclick = () => { settingsView = null; render(); });
-  v.querySelectorAll(".fld-lot").forEach(i => {
+    v.querySelectorAll(".fld-lot").forEach(i => {
     i.oninput = () => { const d = i.value.replace(/[^\d]/g,""); i.value = d ? Number(d).toLocaleString("ja-JP") : ""; };
-    i.onchange = async () => { if (await save("settings", null, {broker:i.dataset.broker, pair:i.dataset.pair, lotSize:num(i.value)})) toast("保存しました"); };
+    i.onchange = () => saveSetting(i.dataset.broker, i.dataset.pair, {lotSize:num(i.value)});
   });
   v.querySelectorAll(".fld-minlot").forEach(i => {
-    i.onchange = async () => { if (await save("settings", null, {broker:i.dataset.broker, pair:"", minLot:i.value === "" ? null : num(i.value)})) toast("保存しました"); };
+    i.onchange = () => saveSetting(i.dataset.broker, "", {minLot:i.value === "" ? null : num(i.value)});
   });
   v.querySelectorAll(".fld-maxpos").forEach(i => {
     i.oninput = () => { const d = i.value.replace(/[^\d]/g,""); i.value = d ? Number(d).toLocaleString("ja-JP") : ""; };
-    i.onchange = async () => { if (await save("settings", null, {broker:i.dataset.broker, pair:i.dataset.pair, maxPosition:i.value === "" ? null : num(i.value)})) toast("保存しました"); };
+    i.onchange = () => saveSetting(i.dataset.broker, i.dataset.pair, {maxPosition:i.value === "" ? null : num(i.value)});
   });
+
 }
 
 
