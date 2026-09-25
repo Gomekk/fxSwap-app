@@ -85,6 +85,11 @@ header.top h1{font-family:var(--serif);font-weight:800;font-size:22px;letter-spa
 section h2{font-family:var(--serif);font-weight:700;font-size:18px;margin:26px 0 10px;display:flex;justify-content:space-between;align-items:baseline;gap:8px}
 section h2 .act{font-family:var(--sans);font-size:13px;font-weight:500}
 .linkbtn{background:none;border:0;padding:4px 0;color:var(--violet);font-weight:700;font-size:13px}
+.setgrid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin:14px 0 6px}
+.setbtn{display:block;text-align:left;padding:14px 16px;border:1px solid var(--line);border-radius:8px;background:var(--card)}
+.setbtn .t{display:block;font-family:var(--serif);font-weight:700;font-size:15px}
+.setbtn .d{display:block;font-size:12px;color:var(--ink-2);margin-top:3px}
+.setbtn[aria-pressed="true"]{border-color:var(--ink);background:var(--paper-2)}
 .hint{font-size:13px;color:var(--ink-3);margin:6px 0}
 
 .chart{background:var(--card);border:1px solid var(--line);border-radius:4px;padding:10px 6px 4px}
@@ -453,22 +458,28 @@ function viewCash(){
   return html + `</ul></section>`;
 }
 
-let settingsOpen = false;
+let settingsPanel = null; // 開いているボタン（例:"basic"）。今後ボタンを増やすときはここに名前を追加していく
 function viewSettings(){
-  let html = `<section><h2>設定<span class="act"><button class="linkbtn" id="toggleBasic">基本情報</button></span></h2>`;
-  html += `<div id="basicInfo" ${settingsOpen ? "" : "hidden"}>
-    <p class="hint">証券会社ごとの「取引単位（1 Lot＝何通貨）」と「最小Lot数」を登録します。</p>
-    <div class="tablebox"><table class="sum" style="width:100%"><thead><tr><th style="text-align:left">証券会社</th><th>取引単位（1 Lot）</th><th>最小Lot数</th></tr></thead><tbody>`;
-  BROKERS.forEach(b => {
-    const cur = state.settings.find(x => x.broker === b);
-    html += `<tr><td>${esc(b)}</td>
-      <td><input data-lot="${esc(b)}" inputmode="numeric" placeholder="例: 10,000" value="${cur && cur.lotSize ? num(cur.lotSize).toLocaleString('ja-JP') : ''}" style="width:100%;max-width:120px;padding:7px 9px;border:1px solid var(--line);border-radius:6px;background:var(--card);font-size:15px;text-align:right"></td>
-      <td><input data-minlot="${esc(b)}" inputmode="decimal" placeholder="例: 0.1" value="${cur && cur.minLot != null ? cur.minLot : ''}" style="width:100%;max-width:90px;padding:7px 9px;border:1px solid var(--line);border-radius:6px;background:var(--card);font-size:15px;text-align:right"></td>
-    </tr>`;
-  });
-  html += `</tbody></table></div></div></section>`;
-  return html;
+  let html = `<section><h2>設定</h2>
+    <div class="setgrid">
+      <button class="setbtn" data-panel="basic" aria-pressed="${settingsPanel==="basic"}"><span class="t">基本情報</span><span class="d">取引単位・最小Lot数</span></button>
+    </div>`;
+  if (settingsPanel === "basic"){
+    html += `<div id="basicInfo">
+      <p class="hint">証券会社ごとの「取引単位（1 Lot＝何通貨）」と「最小Lot数」を登録します。</p>
+      <div class="tablebox"><table class="sum" style="width:100%"><thead><tr><th style="text-align:left">証券会社</th><th>取引単位（1 Lot）</th><th>最小Lot数</th></tr></thead><tbody>`;
+    BROKERS.forEach(b => {
+      const cur = state.settings.find(x => x.broker === b);
+      html += `<tr><td>${esc(b)}</td>
+        <td><input data-lot="${esc(b)}" inputmode="numeric" placeholder="例: 10,000" value="${cur && cur.lotSize ? num(cur.lotSize).toLocaleString('ja-JP') : ''}" style="width:100%;max-width:120px;padding:7px 9px;border:1px solid var(--line);border-radius:6px;background:var(--card);font-size:15px;text-align:right"></td>
+        <td><input data-minlot="${esc(b)}" inputmode="decimal" placeholder="例: 0.1" value="${cur && cur.minLot != null ? cur.minLot : ''}" style="width:100%;max-width:90px;padding:7px 9px;border:1px solid var(--line);border-radius:6px;background:var(--card);font-size:15px;text-align:right"></td>
+      </tr>`;
+    });
+    html += `</tbody></table></div></div>`;
+  }
+  return html + `</section>`;
 }
+
 
 function bindView(){
   const v = $("#view");
@@ -477,9 +488,9 @@ function bindView(){
   v.querySelectorAll("[data-edit-pos]").forEach(b => b.onclick = () => openPos(state.positions.find(w=>w.id===b.dataset.editPos)));
   v.querySelectorAll("[data-edit-closed]").forEach(b => b.onclick = () => openClosed(state.closed.find(w=>w.id===b.dataset.editClosed)));
   v.querySelectorAll("[data-edit-cash]").forEach(b => b.onclick = () => openCash(state.cash.find(w=>w.id===b.dataset.editCash)));
-  const tb = v.querySelector("#toggleBasic");
-  if (tb) tb.onclick = () => { settingsOpen = !settingsOpen; render(); };
-  v.querySelectorAll("[data-lot]").forEach(i => {
+
+v.querySelectorAll("[data-panel]").forEach(b => b.onclick = () => { settingsPanel = settingsPanel === b.dataset.panel ? null : b.dataset.panel; render(); });
+torAll("[data-lot]").forEach(i => {
     i.oninput = () => { const d = i.value.replace(/[^\d]/g,""); i.value = d ? Number(d).toLocaleString("ja-JP") : ""; };
     i.onchange = async () => { if (await save("settings", null, {broker:i.dataset.lot, lotSize:num(i.value)})) toast("保存しました"); };
   });
