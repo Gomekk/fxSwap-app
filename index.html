@@ -622,7 +622,19 @@ $("#csvIn").onchange = async e => {
 document.querySelectorAll("nav.tabs button").forEach(b => b.onclick = () => { tab = b.dataset.tab; render(); window.scrollTo(0,0); });
 let rw = window.innerWidth;
 window.addEventListener("resize", () => { if ((rw < 600) !== (window.innerWidth < 600)){ rw = window.innerWidth; render(); } });
-if ("serviceWorker" in navigator) navigator.serviceWorker.register("./sw.js").catch(() => {});
+if ("serviceWorker" in navigator){
+  navigator.serviceWorker.register("./sw.js").then(reg => {
+    reg.update();
+    reg.addEventListener("updatefound", () => {
+      const nw = reg.installing;
+      if (nw) nw.addEventListener("statechange", () => {
+        if (nw.state === "activated" && navigator.serviceWorker.controller) location.reload();
+      });
+    });
+  }).catch(() => {});
+  let reloaded = false;
+  navigator.serviceWorker.addEventListener("controllerchange", () => { if (!reloaded){ reloaded = true; location.reload(); } });
+}
 render();
 boot();
 })();
