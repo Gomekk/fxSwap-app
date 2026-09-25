@@ -207,11 +207,12 @@ const monthly = w => w.monthly != null ? w.monthly : w.daily * 30;
 const yearly = w => w.yearly != null ? w.yearly : w.daily * 365;
 const cashPrincipal = () => state.cash.reduce((s,c) => s + (c.kind === "out" ? -1 : 1) * num(c.amount), 0);
 const lotSize = broker => { const s = state.settings.find(x => x.broker === broker); return s && num(s.lotSize) > 0 ? num(s.lotSize) : null; };
+const minLotOf = broker => { const s = state.settings.find(x => x.broker === broker); return s && s.minLot !== "" && s.minLot != null ? num(s.minLot) : null; };
 
 /* ---------- Supabase ---------- */
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 const TABLE = {weeks:"weeks", positions:"positions", closed:"closed_positions", cash:"cash_flows", settings:"settings"};
-const NUMS = new Set(["equity","principal","daily","units","swap","margin","fxPl","swapTotal","amount","lots","lotSize"]);
+const NUMS = new Set(["equity","principal","daily","units","swap","margin","fxPl","swapTotal","amount","lots","lotSize","minLot"]);
 const toSnake = k => k.replace(/[A-Z]/g, m => "_" + m.toLowerCase());
 const toCamel = k => k.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
 const fromRow = r => { const o = {}; for (const k in r){ const c = toCamel(k); o[c] = NUMS.has(c) && r[k] != null ? Number(r[k]) : r[k]; } return o; };
@@ -452,15 +453,20 @@ function viewCash(){
   return html + `</ul></section>`;
 }
 
+let settingsOpen = false;
 function viewSettings(){
-  let html = `<section><h2>設定</h2></section>
-    <p class="hint">証券会社ごとに「1 Lot＝何通貨」かを登録しておくと、ポジション追加でLot数を入れるだけで数量が自動計算されます。</p>
-    <div class="tablebox"><table class="sum" style="width:100%"><thead><tr><th style="text-align:left">証券会社</th><th>1 Lotの通貨数</th></tr></thead><tbody>`;
+  let html = `<section><h2>設定<span class="act"><button class="linkbtn" id="toggleBasic">基本情報</button></span></h2>`;
+  html += `<div id="basicInfo" ${settingsOpen ? "" : "hidden"}>
+    <p class="hint">証券会社ごとの「取引単位（1 Lot＝何通貨）」と「最小Lot数」を登録します。</p>
+    <div class="tablebox"><table class="sum" style="width:100%"><thead><tr><th style="text-align:left">証券会社</th><th>取引単位（1 Lot）</th><th>最小Lot数</th></tr></thead><tbody>`;
   BROKERS.forEach(b => {
     const cur = state.settings.find(x => x.broker === b);
-    html += `<tr><td>${esc(b)}</td><td><input data-lot="${esc(b)}" inputmode="numeric" placeholder="例: 10,000" value="${cur ? num(cur.lotSize).toLocaleString('ja-JP') : ''}" style="width:100%;max-width:140px;padding:7px 9px;border:1px solid var(--line);border-radius:6px;background:var(--card);font-size:15px;text-align:right"></td></tr>`;
+    html += `<tr><td>${esc(b)}</td>
+      <td><input data-lot="${esc(b)}" inputmode="numeric" placeholder="例: 10,000" value="${cur && cur.lotSize ? num(cur.lotSize).toLocaleString('ja-JP') : ''}" style="width:100%;max-width:120px;padding:7px 9px;border:1px solid var(--line);border-radius:6px;background:var(--card);font-size:15px;text-align:right"></td>
+      <td><input data-minlot="${esc(b)}" inputmode="decimal" placeholder="例: 0.1" value="${cur && cur.minLot != null ? cur.minLot : ''}" style="width:100%;max-width:90px;padding:7px 9px;border:1px solid var(--line);border-radius:6px;background:var(--card);font-size:15px;text-align:right"></td>
+    </tr>`;
   });
-  html += `</tbody></table></div>`;
+  html += `</tbody></table></div></div></section>`;
   return html;
 }
 
@@ -471,10 +477,16 @@ function bindView(){
   v.querySelectorAll("[data-edit-pos]").forEach(b => b.onclick = () => openPos(state.positions.find(w=>w.id===b.dataset.editPos)));
   v.querySelectorAll("[data-edit-closed]").forEach(b => b.onclick = () => openClosed(state.closed.find(w=>w.id===b.dataset.editClosed)));
   v.querySelectorAll("[data-edit-cash]").forEach(b => b.onclick = () => openCash(state.cash.find(w=>w.id===b.dataset.editCash)));
+  const tb = v.querySelector("#toggleBasic");
+  if (tb) tb.onclick = () => { settingsOpen = !settingsOpen; render(); };
   v.querySelectorAll("[data-lot]").forEach(i => {
     i.oninput = () => { const d = i.value.replace(/[^\d]/g,""); i.value = d ? Number(d).toLocaleString("ja-JP") : ""; };
     i.onchange = async () => { if (await save("settings", null, {broker:i.dataset.lot, lotSize:num(i.value)})) toast("保存しました"); };
   });
+  v.querySelectorAll("[data-minlot]").forEach(i => {
+    i.onchange = async () => { if (await save("settings", null, {broker:i.dataset.minlot, minLot:i.value === "" ? null : num(i.value)})) toast("保存しました"); };
+  });
+
 }
 
 /* ---------- sheet ---------- */
@@ -559,10 +571,12 @@ function openPos(p){
     ${p ? `<button class="linkbtn" data-toclosed>このポジションを決済済みにする</button>` : ""}
     ${actions(!!p)}`);
   const s = $("#sheetIn");
-  const recalc = () => {
-    const v = formVals(), ls = lotSize(v.broker), lots = num(v.lots);
+    const recalc = () => {
+    const v = formVals(), ls = lotSize(v.broker), lots = num(v.lots), min = minLotOf(v.broker);
     const u = ls && lots ? lots * ls : null;
-    s.querySelector("#unitsCalc").textContent = u ? u.toLocaleString("ja-JP") + "通貨" : (v.broker ? "設定タブでLotサイズを登録してください" : "証券会社を選んでください");
+    s.querySelector("#unitsCalc").textContent = !v.broker ? "証券会社を選んでください" : !ls ? "設定タブで取引単位を登録してください" : !lots ? "—" : u.toLocaleString("ja-JP") + "通貨";
+    const lotLabel = s.querySelector('[name="lots"]').previousElementSibling;
+    if (lotLabel) lotLabel.textContent = "Lot数" + (min != null ? `（最小 ${min}）` : "");
     return u;
   };
   s.addEventListener("input", recalc); s.addEventListener("change", recalc); recalc();
@@ -573,11 +587,14 @@ function openPos(p){
     if (!v.broker || !v.pair){ toast("証券会社と通貨ペアを選んでください"); return; }
     const units = recalc();
     if (!num(v.lots)){ toast("Lot数を入力してください"); return; }
-    if (!units){ toast("先に設定タブでLotサイズを登録してください"); return; }
+    if (!units){ toast("先に設定タブで取引単位を登録してください"); return; }
+    const min = minLotOf(v.broker);
+    if (min != null && num(v.lots) < min){ toast(`最小Lot数は${min}です`); return; }
     if (!(await save("positions", p ? p.id : null, {broker:v.broker, pair:v.pair, side:v.side, lots:num(v.lots), units, rate:v.rate, openDate:v.openDate}))) return;
     closeSheet(); toast("保存しました");
   }, () => removeDoc("positions", p.id));
 }
+
 
 
 function openClosed(c, fromPos){
