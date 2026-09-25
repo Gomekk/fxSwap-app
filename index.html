@@ -432,7 +432,7 @@ function viewHold(){
   const byB = {};
   ps.forEach(p => (byB[p.broker||"未設定"] ||= []).push(p));
   for (const [b, list] of Object.entries(byB)){
-  html += `<div class="broker"><span>${esc(b)}</span><span style="font-weight:500;font-size:12px">最小取引単位: <input class="fld-minlot" data-broker="${esc(b)}" inputmode="decimal" placeholder="${minUnitLabel(b) === '万通貨' ? '1' : '0.1'}" value="${minRow && minRow.minLot != null ? minRow.minLot : ''}" style="width:52px;padding:3px 5px;border:1px solid var(--line);border-radius:4px;background:var(--card);font-size:12px;text-align:center">${minUnitLabel(b)}</span></div>
+    html += `<div class="broker"><span>${esc(b)}</span></div><ul class="rows">`;
     list.sort((a,c) => (a.pair||"").localeCompare(c.pair||"")).forEach(p => {
       html += `<li><button class="row pos" data-edit-pos="${esc(p.id)}">
         <span class="p">${esc(p.pair)}<span class="tag">${p.side === "sell" ? "売" : "買"}</span></span>
@@ -445,6 +445,7 @@ function viewHold(){
   }
   return html + `</section>`;
 }
+
 
 function viewClosed(){
   const cs = [...state.closed].sort((a,b) => (b.closeDate||"").localeCompare(a.closeDate||""));
@@ -504,7 +505,7 @@ function viewSettingsBasic(){
   BROKERS.forEach(b => {
     const minRow = settingFor(b, "");
     const capUnit = MAXPOS_UNIT[b] || "lot";
-    html += `<div class="broker"><span>${esc(b)}</span><span style="font-weight:500;font-size:12px">最小取引単位: <input class="fld-minlot" data-broker="${esc(b)}" inputmode="decimal" placeholder="0.1" value="${minRow && minRow.minLot != null ? minRow.minLot : ''}" style="width:52px;padding:3px 5px;border:1px solid var(--line);border-radius:4px;background:var(--card);font-size:12px;text-align:center">lot</span></div>
+    html += `<div class="broker"><span>${esc(b)}</span><span style="font-weight:500;font-size:12px">最小取引単位: <input class="fld-minlot" data-broker="${esc(b)}" inputmode="decimal" placeholder="${minUnitLabel(b) === '万通貨' ? '1' : '0.1'}" value="${minRow && minRow.minLot != null ? minRow.minLot : ''}" style="width:52px;padding:3px 5px;border:1px solid var(--line);border-radius:4px;background:var(--card);font-size:12px;text-align:center">${minUnitLabel(b)}</span></div>
       <div class="tablebox"><table class="sum" style="width:100%"><thead><tr><th style="text-align:left">通貨ペア</th><th>取引単位(1lot=)</th><th>建玉上限</th></tr></thead><tbody>`;
         pairsFor(b).forEach(pr => {
       const cur = settingFor(b, pr);
