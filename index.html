@@ -506,7 +506,7 @@ function bindView(){
     i.oninput = () => { const d = i.value.replace(/[^\d]/g,""); i.value = d ? Number(d).toLocaleString("ja-JP") : ""; };
     i.onchange = async () => { if (await save("settings", null, {broker:i.dataset.broker, pair:i.dataset.pair, lotSize:num(i.value)})) toast("保存しました"); };
   });
-   v.querySelectorAll(".fld-minlot").forEach(i => {
+  v.querySelectorAll(".fld-minlot").forEach(i => {
     i.onchange = async () => { if (await save("settings", null, {broker:i.dataset.broker, pair:"", minLot:i.value === "" ? null : num(i.value)})) toast("保存しました"); };
   });
   v.querySelectorAll(".fld-maxpos").forEach(i => {
@@ -515,78 +515,6 @@ function bindView(){
   });
 }
 
-
-/* ---------- sheet ---------- */
-let lastFocus = null;
-function openSheet(title, body){
-  lastFocus = document.activeElement;
-  $("#sheetIn").innerHTML = `<h3>${esc(title)}<button class="close" aria-label="閉じる" data-close>×</button></h3>${body}`;
-  $("#scrim").classList.add("open"); $("#sheet").classList.add("open");
-  $("#sheetIn").querySelector("[data-close]").onclick = closeSheet;
-  setTimeout(() => $("#sheetIn").querySelector("[data-close]").focus({preventScroll:true}), 60);
-}
-function closeSheet(){ $("#scrim").classList.remove("open"); $("#sheet").classList.remove("open"); if (lastFocus) lastFocus.focus?.(); }
-$("#scrim").onclick = closeSheet;
-document.addEventListener("keydown", e => { if (e.key === "Escape") closeSheet(); });
-const field = (label, name, val, type="text", extra="") => `<label class="f"><span>${label}</span><input name="${name}" type="${type}" value="${esc(val ?? "")}" ${type==="text"&&/金|額|スワップ|損益|数|評価/.test(label)?'inputmode="decimal"':""} ${extra}></label>`;
-const select = (label, name, val, opts) => `<label class="f"><span>${label}</span><select name="${name}">${val ? "" : `<option value="" selected disabled>選択してください</option>`}${[...new Set([...(val?[val]:[]),...opts])].map(o=>`<option ${o===val?"selected":""}>${esc(o)}</option>`).join("")}</select></label>`;
-const seg = (name, val, opts) => `<div class="seg" data-seg="${name}">${opts.map(([v,l])=>`<button type="button" data-v="${v}" aria-pressed="${v===val}">${l}</button>`).join("")}</div>`;
-const actions = (hasDelete) => `<div class="actions">${hasDelete ? `<button class="btn danger small" data-del>削除</button>` : ""}<div class="right"><button class="btn ghost" data-close2>やめる</button><button class="btn" data-save>保存する</button></div></div>`;
-function formVals(){ const o = {}; $("#sheetIn").querySelectorAll("input[name],select[name],textarea[name]").forEach(i => o[i.name] = i.value.trim()); $("#sheetIn").querySelectorAll("[data-seg]").forEach(s => o[s.dataset.seg] = s.querySelector('[aria-pressed="true"]').dataset.v); return o; }
-function wire(onSave, onDel){
-  const s = $("#sheetIn");
-  s.querySelectorAll("[data-seg] button").forEach(b => b.onclick = () => { b.parentNode.querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", x===b)); s.dispatchEvent(new Event("input")); });
-  s.querySelector("[data-close2]").onclick = closeSheet;
-  s.querySelector("[data-save]").onclick = onSave;
-  const d = s.querySelector("[data-del]"); if (d) d.onclick = () => { if (confirm("この項目を削除しますか？")) { onDel(); closeSheet(); toast("削除しました"); } };
-}
-
-/* weekly record */
-function openWeek(w){
-  const ws = weeksSorted(), last = ws[ws.length-1];
-  const hasCash = state.cash.length > 0;
-  const principal = w ? w.principal : hasCash ? cashPrincipal() : last ? last.principal : 0;
-  const daily = w ? w.daily : last ? last.daily : 0;
-  let brokers = w && w.brokers ? {...w.brokers} : {};
-  if (!w){
-    const names = [...new Set([...state.positions.map(p=>p.broker).filter(Boolean), ...Object.keys((last&&last.brokers)||{})])];
-    names.forEach(n => brokers[n] = "");
-  }
-  const brokerHtml = () => Object.keys(brokers).map((n,i) => `<div class="brokerRow"><input data-bn="${i}" value="${esc(n)}" aria-label="業者名"><input data-bv="${i}" inputmode="decimal" placeholder="有効評価額" value="${esc(brokers[n])}" aria-label="${esc(n)}の有効評価額"><button class="x" data-bx="${i}" aria-label="削除">×</button></div>`).join("");
-  const shot = "";
-  openSheet(w ? `${fmtDate(w.date)} の記録` : "今週の記録", `
-    ${field("記録日","date", w ? w.date : today(), "date")}
-    ${shot}
-    <div class="f"><span>業者ごとの有効評価額（合計が有効評価額になります）</span><div id="bRows">${brokerHtml()}</div><button class="linkbtn" id="bAdd">＋ 業者を追加</button></div>
-    ${field("有効評価額（合計）","equity", w ? w.equity : "", "text", 'inputmode="decimal"')}
-    ${field("1日あたりスワップ","daily", daily, "text", 'inputmode="decimal"')}
-    ${field("元金" + (!w && hasCash ? "（入出金から自動計算）" : ""),"principal", principal, "text", 'inputmode="decimal"')}
-    <div class="calc" id="wcalc"></div>
-    ${field("メモ","memo", w ? w.memo : "")}
-    ${actions(!!w)}`);
-  const s = $("#sheetIn");
-  const readBrokers = () => { const o = {}; s.querySelectorAll("[data-bn]").forEach(i => { const n = i.value.trim(); if (n) o[n] = s.querySelector(`[data-bv="${i.dataset.bn}"]`).value.trim(); }); return o; };
-  const redraw = () => { s.querySelector("#bRows").innerHTML = brokerHtml(); bindRows(); };
-  const bindRows = () => {
-    s.querySelectorAll("[data-bx]").forEach(b => b.onclick = () => { brokers = readBrokers(); delete brokers[Object.keys(brokers)[b.dataset.bx]]; redraw(); sumUp(); });
-    s.querySelectorAll("[data-bv],[data-bn]").forEach(i => i.oninput = () => { brokers = readBrokers(); sumUp(); });
-  };
-  const sumUp = () => { const vals = Object.values(brokers).filter(v => v !== ""); if (vals.length) s.querySelector('[name="equity"]').value = vals.reduce((a,v)=>a+num(v),0); calc(); };
-  const calc = () => {
-    const v = formVals(), eq = num(v.equity), pr = num(v.principal), d = num(v.daily);
-    s.querySelector("#wcalc").innerHTML = `<span>利益（評価−元金）</span><b class="${eq ? cls(eq-pr) : ""}">${eq ? signed(eq-pr) : "—"}</b><span>月間 / 年間スワップ</span><span>${yen(d*30)} / ${yen(d*365)}</span>`;
-  };
-  s.querySelector("#bAdd").onclick = () => { brokers = readBrokers(); const n = BROKERS.find(b => !(b in brokers)) || "業者" + (Object.keys(brokers).length+1); brokers[n] = ""; redraw(); };
-  s.oninput = calc; bindRows(); calc();
-  wire(async () => {
-    const v = formVals();
-    if (!v.date || !num(v.equity)){ toast("記録日と有効評価額を入力してください"); return; }
-    const b = readBrokers(), bClean = {}; for (const k in b) if (b[k] !== "") bClean[k] = num(b[k]);
-    const doc = {date:v.date, equity:num(v.equity), principal:num(v.principal), daily:num(v.daily), brokers:bClean, memo:v.memo};
-    if (w && w.date !== v.date) await removeDoc("weeks", w.id);
-    if (await save("weeks", w && w.date === v.date ? w.id : null, doc)){ closeSheet(); toast("記録しました"); }
-  }, () => removeDoc("weeks", w.id));
-}
 
 function openPos(p){
   openSheet(p ? "ポジションを編集" : "ポジションを追加", `
