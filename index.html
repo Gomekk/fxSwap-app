@@ -190,6 +190,13 @@ const SUPABASE_KEY = "sb_publishable_sj2rETV0MdsP1hA56C70kQ_F5eS1Via";
 
 const BROKERS = ["外為どっとコム","GMOクリック証券","みんなのFX","トライオートFX","セントラル短資"];
 const PAIRS = ["TRY/JPY","MXN/JPY","ZAR/JPY","HUF/JPY","PLN/JPY","CHF/MXN","CHF/TRY","CHF/ZAR"];
+const LIGHT_PAIRS = { "みんなのFX": ["TRY/JPY","MXN/JPY","ZAR/JPY","HUF/JPY"] };
+const pairsFor = broker => {
+  const extra = new Set(LIGHT_PAIRS[broker] || []);
+  const out = [];
+  PAIRS.forEach(p => { out.push(p); if (extra.has(p)) out.push(p + "(LIGHT)"); });
+  return out;
+};
 const COLS = ["weeks","positions","closed","cash","settings"];
 const state = {weeks:[],positions:[],closed:[],cash:[],settings:[]};
 let ready = false, authKnown = false, session = null, tab = "trend";
@@ -491,7 +498,7 @@ function viewSettingsBasic(){
     const capUnit = MAXPOS_UNIT[b] || "lot";
     html += `<div class="broker"><span>${esc(b)}</span><span style="font-weight:500;font-size:12px">最小取引単位: <input class="fld-minlot" data-broker="${esc(b)}" inputmode="decimal" placeholder="0.1" value="${minRow && minRow.minLot != null ? minRow.minLot : ''}" style="width:52px;padding:3px 5px;border:1px solid var(--line);border-radius:4px;background:var(--card);font-size:12px;text-align:center">lot</span></div>
       <div class="tablebox"><table class="sum" style="width:100%"><thead><tr><th style="text-align:left">通貨ペア</th><th>取引単位(1lot=)</th><th>建玉上限</th></tr></thead><tbody>`;
-    PAIRS.forEach(pr => {
+        pairsFor(b).forEach(pr => {
       const cur = settingFor(b, pr);
       html += `<tr><td style="text-align:left">${esc(pr)}</td>
        <td><input class="fld-lot" data-broker="${esc(b)}" data-pair="${esc(pr)}" inputmode="numeric" placeholder="例:10,000" value="${cur && cur.lotSize ? num(cur.lotSize).toLocaleString('ja-JP') : ''}" style="${inputStyle(80,'center')}"><span style="margin-left:4px;font-size:12px;color:var(--ink-2)">通貨</span></td>
@@ -530,7 +537,7 @@ function bindView(){
 
 function openPos(p){
   openSheet(p ? "ポジションを編集" : "ポジションを追加", `
-    <div class="two">${select("証券会社","broker",p?p.broker:"",BROKERS)}${select("通貨ペア","pair",p?p.pair:"",PAIRS)}</div>
+    <div class="two">${select("証券会社","broker",p?p.broker:"",BROKERS)}${select("通貨ペア","pair",p?p.pair:"",pairsFor(p?p.broker:""))}</div>
     <div class="f"><span>売買</span>${seg("side", p ? p.side : "buy", [["buy","買い"],["sell","売り"]])}</div>
     <div class="two">${field("Lot数","lots",p?p.lots:"","text",'inputmode="decimal"')}<label class="f"><span>数量（通貨）</span><div id="unitsCalc" style="padding:10px 12px;border:1px solid var(--line);border-radius:6px;background:var(--paper-2);font-weight:700">—</div></label></div>
     <p class="hint" id="capHint"></p>
@@ -539,6 +546,12 @@ function openPos(p){
     ${p ? `<button class="linkbtn" data-toclosed>このポジションを決済済みにする</button>` : ""}
     ${actions(!!p)}`);
   const s = $("#sheetIn");
+  const pairSel = s.querySelector('[name="pair"]');
+  s.querySelector('[name="broker"]').addEventListener("change", e => {
+    const opts = pairsFor(e.target.value);
+    pairSel.innerHTML = `<option value="" selected disabled>選択してください</option>` + opts.map(o => `<option>${esc(o)}</option>`).join("");
+  });
+
     const recalc = () => {
     const v = formVals(), ls = lotSize(v.broker, v.pair), lots = num(v.lots), min = minLotOf(v.broker);
     const u = ls && lots ? lots * ls : null;
@@ -580,14 +593,20 @@ function openPos(p){
 function openClosed(c, fromPos){
   const src = c || (fromPos ? {broker:fromPos.broker,pair:fromPos.pair,units:fromPos.units,openRate:fromPos.rate,openDate:fromPos.openDate,closeDate:today()} : null);
   openSheet(c ? "決済を編集" : "決済を追加", `
-    <div class="two">${select("証券会社","broker",src?src.broker:BROKERS[0],BROKERS)}${select("通貨ペア","pair",src?src.pair:PAIRS[0],PAIRS)}</div>
+    <div class="two">${select("証券会社","broker",src?src.broker:BROKERS[0],BROKERS)}${select("通貨ペア","pair",src?src.pair:PAIRS[0],pairsFor(src?src.broker:BROKERS[0]))}</div>
     ${field("数量（通貨）","units",src?src.units:"","text",'inputmode="numeric"')}
     <div class="two">${field("建玉日","openDate",src?src.openDate:"","date")}${field("決済日","closeDate",src?src.closeDate:today(),"date")}</div>
     <div class="two">${field("建玉レート","openRate",src?src.openRate:"","text",'inputmode="decimal"')}${field("決済レート","closeRate",src?src.closeRate:"","text",'inputmode="decimal"')}</div>
     <div class="two">${field("為替損益（円）","fxPl",src?src.fxPl:"","text",'inputmode="decimal"')}${field("累計スワップ（円）","swapTotal",src?src.swapTotal:"","text",'inputmode="decimal"')}</div>
-    ${fromPos ? `<p class="hint">保存すると保有ポジションから外れます。</p>` : ""}
+        ${fromPos ? `<p class="hint">保存すると保有ポジションから外れます。</p>` : ""}
     ${actions(!!c)}`);
+  $("#sheetIn").querySelector('[name="broker"]').addEventListener("change", e => {
+    const pairSel = $("#sheetIn").querySelector('[name="pair"]');
+    const opts = pairsFor(e.target.value);
+    pairSel.innerHTML = `<option value="" selected disabled>選択してください</option>` + opts.map(o => `<option>${esc(o)}</option>`).join("");
+  });
   wire(async () => {
+
     const v = formVals();
     if (!(await save("closed", c ? c.id : null, {broker:v.broker, pair:v.pair, units:num(v.units), openDate:v.openDate, closeDate:v.closeDate, openRate:v.openRate, closeRate:v.closeRate, fxPl:num(v.fxPl), swapTotal:num(v.swapTotal)}))) return;
     if (fromPos) await removeDoc("positions", fromPos.id);
