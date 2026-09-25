@@ -90,6 +90,7 @@ section h2 .act{font-family:var(--sans);font-size:13px;font-weight:500}
 .setbtn .t{display:block;font-family:var(--serif);font-weight:700;font-size:15px}
 .setbtn .d{display:block;font-size:12px;color:var(--ink-2);margin-top:3px}
 .setbtn[aria-pressed="true"]{border-color:var(--ink);background:var(--paper-2)}
+.subhead{margin:4px 0 2px}
 .hint{font-size:13px;color:var(--ink-3);margin:6px 0}
 
 .chart{background:var(--card);border:1px solid var(--line);border-radius:4px;padding:10px 6px 4px}
@@ -211,13 +212,16 @@ const weeksSorted = () => [...state.weeks].sort((a,b) => a.date < b.date ? -1 : 
 const monthly = w => w.monthly != null ? w.monthly : w.daily * 30;
 const yearly = w => w.yearly != null ? w.yearly : w.daily * 365;
 const cashPrincipal = () => state.cash.reduce((s,c) => s + (c.kind === "out" ? -1 : 1) * num(c.amount), 0);
-const lotSize = broker => { const s = state.settings.find(x => x.broker === broker); return s && num(s.lotSize) > 0 ? num(s.lotSize) : null; };
-const minLotOf = broker => { const s = state.settings.find(x => x.broker === broker); return s && s.minLot !== "" && s.minLot != null ? num(s.minLot) : null; };
+const settingFor = (broker, pair) => state.settings.find(x => x.broker === broker && x.pair === pair);
+const lotSize = (broker, pair) => { const s = settingFor(broker, pair); return s && num(s.lotSize) > 0 ? num(s.lotSize) : null; };
+const minLotOf = (broker, pair) => { const s = settingFor(broker, pair); return s && s.minLot !== "" && s.minLot != null ? num(s.minLot) : null; };
+const maxPositionOf = (broker, pair) => { const s = settingFor(broker, pair); return s && s.maxPosition !== "" && s.maxPosition != null ? num(s.maxPosition) : null; };
+const inputStyle = w => `width:100%;max-width:${w}px;padding:6px 8px;border:1px solid var(--line);border-radius:6px;background:var(--card);font-size:14px;text-align:right`;
 
 /* ---------- Supabase ---------- */
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 const TABLE = {weeks:"weeks", positions:"positions", closed:"closed_positions", cash:"cash_flows", settings:"settings"};
-const NUMS = new Set(["equity","principal","daily","units","swap","margin","fxPl","swapTotal","amount","lots","lotSize","minLot"]);
+const NUMS = new Set(["equity","principal","daily","units","swap","margin","fxPl","swapTotal","amount","lots","lotSize","minLot","maxPosition"]);
 const toSnake = k => k.replace(/[A-Z]/g, m => "_" + m.toLowerCase());
 const toCamel = k => k.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
 const fromRow = r => { const o = {}; for (const k in r){ const c = toCamel(k); o[c] = NUMS.has(c) && r[k] != null ? Number(r[k]) : r[k]; } return o; };
@@ -240,7 +244,7 @@ async function save(col, id, data){
   const row = toRow(data); row.user_id = session.user.id;
   let q;
   if (col === "weeks" && !id) q = sb.from("weeks").upsert(row, { onConflict: "user_id,date" });
-  else if (col === "settings" && !id) q = sb.from("settings").upsert(row, { onConflict: "user_id,broker" });
+  else if (col === "settings" && !id) q = sb.from("settings").upsert(row, { onConflict: "user_id,broker,pair" });
   else if (id) q = sb.from(TABLE[col]).update(row).eq("id", id);
   else q = sb.from(TABLE[col]).insert(row);
   const { error } = await q;
@@ -458,28 +462,33 @@ function viewCash(){
   return html + `</ul></section>`;
 }
 
-let settingsPanel = null; // 開いているボタン（例:"basic"）。今後ボタンを増やすときはここに名前を追加していく
+let settingsView = null; // null=一覧、"basic"=基本情報の画面
 function viewSettings(){
-  let html = `<section><h2>設定</h2>
+  if (settingsView === "basic") return viewSettingsBasic();
+  return `<section><h2>設定</h2>
     <div class="setgrid">
-      <button class="setbtn" data-panel="basic" aria-pressed="${settingsPanel==="basic"}"><span class="t">基本情報</span><span class="d">取引単位・最小Lot数</span></button>
-    </div>`;
-  if (settingsPanel === "basic"){
-    html += `<div id="basicInfo">
-      <p class="hint">証券会社ごとの「取引単位（1 Lot＝何通貨）」と「最小Lot数」を登録します。</p>
-      <div class="tablebox"><table class="sum" style="width:100%"><thead><tr><th style="text-align:left">証券会社</th><th>取引単位（1 Lot）</th><th>最小Lot数</th></tr></thead><tbody>`;
-    BROKERS.forEach(b => {
-      const cur = state.settings.find(x => x.broker === b);
-      html += `<tr><td>${esc(b)}</td>
-        <td><input data-lot="${esc(b)}" inputmode="numeric" placeholder="例: 10,000" value="${cur && cur.lotSize ? num(cur.lotSize).toLocaleString('ja-JP') : ''}" style="width:100%;max-width:120px;padding:7px 9px;border:1px solid var(--line);border-radius:6px;background:var(--card);font-size:15px;text-align:right"></td>
-        <td><input data-minlot="${esc(b)}" inputmode="decimal" placeholder="例: 0.1" value="${cur && cur.minLot != null ? cur.minLot : ''}" style="width:100%;max-width:90px;padding:7px 9px;border:1px solid var(--line);border-radius:6px;background:var(--card);font-size:15px;text-align:right"></td>
+      <button class="setbtn" data-panel="basic"><span class="t">基本情報</span><span class="d">取引単位・最小Lot数・建玉上限</span></button>
+    </div></section>`;
+}
+function viewSettingsBasic(){
+  let html = `<div class="subhead"><button class="linkbtn" data-back>← 設定</button></div>
+    <h2 style="margin:8px 0 4px">基本情報</h2>
+    <p class="hint">証券会社・通貨ペアごとに登録します。空欄の項目はチェックされません。</p>`;
+  BROKERS.forEach(b => {
+    html += `<div class="broker"><span>${esc(b)}</span></div>
+      <div class="tablebox"><table class="sum" style="width:100%"><thead><tr><th style="text-align:left">通貨ペア</th><th>取引単位</th><th>最小Lot</th><th>建玉上限</th></tr></thead><tbody>`;
+    PAIRS.forEach(pr => {
+      const cur = settingFor(b, pr);
+      html += `<tr><td style="text-align:left">${esc(pr)}</td>
+        <td><input class="fld-lot" data-broker="${esc(b)}" data-pair="${esc(pr)}" inputmode="numeric" placeholder="例:10000" value="${cur && cur.lotSize ? num(cur.lotSize).toLocaleString('ja-JP') : ''}" style="${inputStyle(90)}"></td>
+        <td><input class="fld-minlot" data-broker="${esc(b)}" data-pair="${esc(pr)}" inputmode="decimal" placeholder="0.1" value="${cur && cur.minLot != null ? cur.minLot : ''}" style="${inputStyle(70)}"></td>
+        <td><input class="fld-maxpos" data-broker="${esc(b)}" data-pair="${esc(pr)}" inputmode="numeric" placeholder="例:50万" value="${cur && cur.maxPosition ? num(cur.maxPosition).toLocaleString('ja-JP') : ''}" style="${inputStyle(100)}"></td>
       </tr>`;
     });
-    html += `</tbody></table></div></div>`;
-  }
-  return html + `</section>`;
+    html += `</tbody></table></div>`;
+  });
+  return html;
 }
-
 
 function bindView(){
   const v = $("#view");
@@ -488,17 +497,21 @@ function bindView(){
   v.querySelectorAll("[data-edit-pos]").forEach(b => b.onclick = () => openPos(state.positions.find(w=>w.id===b.dataset.editPos)));
   v.querySelectorAll("[data-edit-closed]").forEach(b => b.onclick = () => openClosed(state.closed.find(w=>w.id===b.dataset.editClosed)));
   v.querySelectorAll("[data-edit-cash]").forEach(b => b.onclick = () => openCash(state.cash.find(w=>w.id===b.dataset.editCash)));
-
-v.querySelectorAll("[data-panel]").forEach(b => b.onclick = () => { settingsPanel = settingsPanel === b.dataset.panel ? null : b.dataset.panel; render(); });
-torAll("[data-lot]").forEach(i => {
+  v.querySelectorAll("[data-panel]").forEach(b => b.onclick = () => { settingsView = b.dataset.panel; render(); });
+  v.querySelectorAll("[data-back]").forEach(b => b.onclick = () => { settingsView = null; render(); });
+  v.querySelectorAll(".fld-lot").forEach(i => {
     i.oninput = () => { const d = i.value.replace(/[^\d]/g,""); i.value = d ? Number(d).toLocaleString("ja-JP") : ""; };
-    i.onchange = async () => { if (await save("settings", null, {broker:i.dataset.lot, lotSize:num(i.value)})) toast("保存しました"); };
+    i.onchange = async () => { if (await save("settings", null, {broker:i.dataset.broker, pair:i.dataset.pair, lotSize:num(i.value)})) toast("保存しました"); };
   });
-  v.querySelectorAll("[data-minlot]").forEach(i => {
-    i.onchange = async () => { if (await save("settings", null, {broker:i.dataset.minlot, minLot:i.value === "" ? null : num(i.value)})) toast("保存しました"); };
+  v.querySelectorAll(".fld-minlot").forEach(i => {
+    i.onchange = async () => { if (await save("settings", null, {broker:i.dataset.broker, pair:i.dataset.pair, minLot:i.value === "" ? null : num(i.value)})) toast("保存しました"); };
   });
-
+  v.querySelectorAll(".fld-maxpos").forEach(i => {
+    i.oninput = () => { const d = i.value.replace(/[^\d]/g,""); i.value = d ? Number(d).toLocaleString("ja-JP") : ""; };
+    i.onchange = async () => { if (await save("settings", null, {broker:i.dataset.broker, pair:i.dataset.pair, maxPosition:i.value === "" ? null : num(i.value)})) toast("保存しました"); };
+  });
 }
+
 
 /* ---------- sheet ---------- */
 let lastFocus = null;
@@ -577,17 +590,20 @@ function openPos(p){
     <div class="two">${select("証券会社","broker",p?p.broker:"",BROKERS)}${select("通貨ペア","pair",p?p.pair:"",PAIRS)}</div>
     <div class="f"><span>売買</span>${seg("side", p ? p.side : "buy", [["buy","買い"],["sell","売り"]])}</div>
     <div class="two">${field("Lot数","lots",p?p.lots:"","text",'inputmode="decimal"')}<label class="f"><span>数量（通貨）</span><div id="unitsCalc" style="padding:10px 12px;border:1px solid var(--line);border-radius:6px;background:var(--paper-2);font-weight:700">—</div></label></div>
+    <p class="hint" id="capHint"></p>
     ${field("建値","rate",p?p.rate:"","text",'inputmode="decimal"')}
     ${field("建玉日","openDate",p?p.openDate:today(),"date")}
     ${p ? `<button class="linkbtn" data-toclosed>このポジションを決済済みにする</button>` : ""}
     ${actions(!!p)}`);
   const s = $("#sheetIn");
-    const recalc = () => {
-    const v = formVals(), ls = lotSize(v.broker), lots = num(v.lots), min = minLotOf(v.broker);
+  const recalc = () => {
+    const v = formVals(), ls = lotSize(v.broker, v.pair), lots = num(v.lots), min = minLotOf(v.broker, v.pair), max = maxPositionOf(v.broker, v.pair);
     const u = ls && lots ? lots * ls : null;
-    s.querySelector("#unitsCalc").textContent = !v.broker ? "証券会社を選んでください" : !ls ? "設定タブで取引単位を登録してください" : !lots ? "—" : u.toLocaleString("ja-JP") + "通貨";
+    s.querySelector("#unitsCalc").textContent = !v.broker || !v.pair ? "証券会社と通貨ペアを選んでください" : !ls ? "設定タブで取引単位を登録してください" : !lots ? "—" : u.toLocaleString("ja-JP") + "通貨";
     const lotLabel = s.querySelector('[name="lots"]').previousElementSibling;
     if (lotLabel) lotLabel.textContent = "Lot数" + (min != null ? `（最小 ${min}）` : "");
+    const existing = state.positions.filter(x => x.broker === v.broker && x.pair === v.pair && (!p || x.id !== p.id)).reduce((s2,x) => s2 + num(x.units), 0);
+    s.querySelector("#capHint").textContent = max != null ? `建玉上限 ${max.toLocaleString("ja-JP")}通貨（このペアの現在の保有 ${existing.toLocaleString("ja-JP")}通貨）` : "";
     return u;
   };
   s.addEventListener("input", recalc); s.addEventListener("change", recalc); recalc();
@@ -599,12 +615,18 @@ function openPos(p){
     const units = recalc();
     if (!num(v.lots)){ toast("Lot数を入力してください"); return; }
     if (!units){ toast("先に設定タブで取引単位を登録してください"); return; }
-    const min = minLotOf(v.broker);
+    const min = minLotOf(v.broker, v.pair);
     if (min != null && num(v.lots) < min){ toast(`最小Lot数は${min}です`); return; }
+    const max = maxPositionOf(v.broker, v.pair);
+    if (max != null){
+      const existing = state.positions.filter(x => x.broker === v.broker && x.pair === v.pair && (!p || x.id !== p.id)).reduce((s2,x) => s2 + num(x.units), 0);
+      if (existing + units > max){ toast(`建玉上限（${max.toLocaleString("ja-JP")}通貨）を超えます`); return; }
+    }
     if (!(await save("positions", p ? p.id : null, {broker:v.broker, pair:v.pair, side:v.side, lots:num(v.lots), units, rate:v.rate, openDate:v.openDate}))) return;
     closeSheet(); toast("保存しました");
   }, () => removeDoc("positions", p.id));
 }
+
 
 
 
