@@ -213,8 +213,8 @@ const pairsFor = broker => {
   PAIRS.forEach(p => { out.push(p); if (extra.has(p)) out.push(p + "(LIGHT)"); });
   return out;
 };
-const COLS = ["weeks","positions","closed","cash","settings","goals"];
-const state = {weeks:[],positions:[],closed:[],cash:[],settings:[],goals:[]};
+const COLS = ["weeks","positions","closed","cash","settings","goals","milestones"];
+const state = {weeks:[],positions:[],closed:[],cash:[],settings:[],goals:[],milestones:[]};
 let ready = false, authKnown = false, session = null, tab = "trend";
 
 const $ = s => document.querySelector(s);
@@ -248,11 +248,14 @@ const minViolation = (broker, lots, units) => {
   const bad = unit === "万通貨" ? (units < min * 10000) : (lots < min);
   return bad ? {min, unit} : null;
 };
+const swapPointOf = (broker, pair) => { const s = settingFor(broker, pair); return s && s.swapPoint !== "" && s.swapPoint != null ? num(s.swapPoint) : null; };
+const marginRequiredOf = (broker, pair) => { const s = settingFor(broker, pair); return s && s.marginRequired !== "" && s.marginRequired != null ? num(s.marginRequired) : null; };
+const posDailySwap = p => { const sp = swapPointOf(p.broker, p.pair); return sp == null ? 0 : sp * num(p.lots) * (p.side === "sell" ? -1 : 1); };
 const inputStyle = (w, align="right") => `width:100%;max-width:${w}px;padding:6px 8px;border:1px solid var(--line);border-radius:6px;background:var(--card);font-size:14px;text-align:${align}`;
 
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-const TABLE = {weeks:"weeks", positions:"positions", closed:"closed_positions", cash:"cash_flows", settings:"settings", goals:"goals"};
-const NUMS = new Set(["equity","principal","daily","units","swap","margin","fxPl","swapTotal","amount","lots","lotSize","minLot","maxPosition","monthlyTarget","yearlyTarget","principalTarget"]);
+const TABLE = {weeks:"weeks", positions:"positions", closed:"closed_positions", cash:"cash_flows", settings:"settings", goals:"goals", milestones:"goal_milestones"};
+const NUMS = new Set(["equity","principal","daily","units","swap","margin","fxPl","swapTotal","amount","lots","lotSize","minLot","maxPosition","monthlyTarget","yearlyTarget","principalTarget","swapPoint","marginRequired","targetAmount"]);
 const toSnake = k => k.replace(/[A-Z]/g, m => "_" + m.toLowerCase());
 const toCamel = k => k.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
 const fromRow = r => { const o = {}; for (const k in r){ const c = toCamel(k); o[c] = NUMS.has(c) && r[k] != null ? Number(r[k]) : r[k]; } return o; };
@@ -383,7 +386,7 @@ function viewTrend(){
   const dSw = prev ? last.daily - prev.daily : null;
   const yieldPct = last.equity > 0 ? yearly(last) / last.equity * 100 : 0;
   html += `<div class="cert">${rosette()}<div class="inner">
-    <p class="cap">1日あたりのスワップ</p>
+    <p class="cap">1日あたりのスワップ<button class="linkbtn" data-act="swapBreakdown" style="margin-left:8px">内訳</button></p>
     <p class="big"><small>¥</small>${Math.round(last.daily).toLocaleString("ja-JP")}</p>
     <p class="rate">${dSw != null ? `前週比 <b class="${cls(dSw)}">${signed(dSw)}</b>　` : ""}評価額に対する年間スワップ <b>${yieldPct.toFixed(0)}%</b></p>
     <dl>
@@ -396,8 +399,6 @@ function viewTrend(){
   const next = addDays(last.date, 7), gap = daysBetween(next, today());
   if (gap >= 0){
     html += `<div class="due"><p>${gap === 0 ? "今日は記録日です" : `前回から${daysBetween(last.date,today())}日経過しています`}</p><button class="btn" data-act="record">記録する</button></div>`;
-  } else {
-    html += `<p class="hint" style="margin:-6px 0 14px">次の記録日は ${fmtDate(next)}（${["日","月","火","水","木","金","土"][new Date(next+"T00:00:00").getDay()]}）です。<button class="linkbtn" data-act="record">今すぐ記録</button></p>`;
   }
   html += `<section><h2>推移</h2>${chart(ws)}</section>`;
   html += `<section><h2>週ごとの記録<span class="act"><button class="linkbtn" data-act="record">＋ 記録</button></span></h2><ul class="rows">`;
@@ -418,7 +419,7 @@ function viewTrend(){
 function chart(ws){
   const data = ws.slice(-26);
   if (data.length < 2) return `<p class="hint">2週分以上の記録がたまるとグラフが表示されます。</p>`;
-  const W = window.innerWidth < 600 ? 400 : 680, H = window.innerWidth < 600 ? 230 : 250, L = 44, Rt = 50, T = 14, B = 30, iw = W-L-Rt, ih = H-T-B;
+  const W = window.innerWidth < 600 ? 400 : 680, H = window.innerWidth < 600 ? 230 : 250, L = 68, Rt = 78, T = 14, B = 30, iw = W-L-Rt, ih = H-T-B;
   const maxS = Math.max(...data.map(w => w.daily)) * 1.15 || 1;
   const eqs = data.map(w => w.equity), minE = Math.min(...eqs), maxE = Math.max(...eqs);
   const pad = (maxE - minE) * .25 || maxE*.1 || 1, e0 = Math.max(0, minE - pad), e1 = maxE + pad;
@@ -426,13 +427,13 @@ function chart(ws){
   const xs = i => L + bw*i + bw/2;
   const ys = v => T + ih - v/maxS*ih;
   const ye = v => T + ih - (v-e0)/(e1-e0)*ih;
-  const short = n => n >= 1e6 ? (n/1e6).toFixed(n>=1e7?0:1)+"M" : n >= 1e3 ? Math.round(n/1e3)+"k" : Math.round(n);
+  const fnum = n => Math.round(n).toLocaleString("ja-JP");
   let s = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="1日あたりスワップと有効評価額の推移">`;
   for (let g = 0; g <= 4; g++){
     const y = T + ih*g/4;
     s += `<line x1="${L}" x2="${W-Rt}" y1="${y}" y2="${y}" stroke="var(--line)" stroke-width="1"/>`;
-    s += `<text x="${L-6}" y="${y+4}" text-anchor="end" font-size="10.5" fill="var(--ink-3)">¥${short(maxS*(1-g/4))}</text>`;
-    s += `<text x="${W-Rt+6}" y="${y+4}" font-size="10.5" fill="var(--violet)">¥${short(e1-(e1-e0)*g/4)}</text>`;
+    s += `<text x="${L-6}" y="${y+4}" text-anchor="end" font-size="9.5" fill="var(--ink-3)">¥${fnum(maxS*(1-g/4))}</text>`;
+    s += `<text x="${W-Rt+6}" y="${y+4}" font-size="9.5" fill="var(--violet)">¥${fnum(e1-(e1-e0)*g/4)}</text>`;
   }
   data.forEach((w,i) => {
     const h = ih - (ys(w.daily)-T);
@@ -446,6 +447,22 @@ function chart(ws){
   return `<div class="chart"><div class="legend"><span><i style="background:var(--bar)"></i>1日あたりスワップ（左）</span><span><i style="background:var(--violet);height:3px;vertical-align:3px"></i>有効評価額（右）</span></div>${s}</div>`;
 }
 
+function openSwapBreakdown(){
+  const g = {};
+  state.positions.forEach(p => { g[p.pair] ||= 0; g[p.pair] += posDailySwap(p); });
+  const rows = Object.entries(g).sort((a,c) => c[1] - a[1]);
+  const total = rows.reduce((s,[,v]) => s + v, 0);
+  let body = `<div class="calc"><span>全証券会社の合計</span><b class="${cls(total)}">${signed(total)}</b></div>`;
+  if (!rows.length){
+    body += `<p class="hint">保有ポジションがありません。</p>`;
+  } else {
+    body += `<div class="tablebox"><table class="sum" style="width:100%"><thead><tr><th style="text-align:left">通貨ペア</th><th>1日あたりスワップ</th></tr></thead><tbody>`;
+    rows.forEach(([pair, v]) => { body += `<tr><td style="text-align:left">${esc(pair)}</td><td class="${cls(v)}">${signed(v)}</td></tr>`; });
+    body += `</tbody></table></div>`;
+  }
+  openSheet("通貨ペアごとの1日あたりスワップ", body);
+}
+
 let holdView = {}; // 証券会社ごとの表示（"summary" | "list"）。既定はサマリー
 function viewHold(){
   const ps = state.positions;
@@ -455,14 +472,15 @@ function viewHold(){
   ps.forEach(p => (byB[p.broker||"未設定"] ||= []).push(p));
   for (const [b, list] of Object.entries(byB)){
     const view = holdView[b] || "summary";
-    html += `<div class="broker"><span>${esc(b)}</span></div>
+    const brokerDaily = list.reduce((s,p) => s + posDailySwap(p), 0);
+    html += `<div class="broker"><span>${esc(b)}</span><span>1日 ${signed(brokerDaily)}</span></div>
       <div class="holdseg" data-broker="${esc(b)}"><button data-v="summary" aria-pressed="${view==="summary"}">サマリー</button><button data-v="list" aria-pressed="${view==="list"}">一覧</button></div>`;
     if (view === "summary"){
       const g = {};
-      list.forEach(p => { g[p.pair] ||= {units:0, lots:0, buy:0, sell:0}; g[p.pair].units += num(p.units); g[p.pair].lots += num(p.lots); g[p.pair][p.side === "sell" ? "sell" : "buy"]++; });
-      html += `<div class="tablebox"><table class="sum" style="width:100%"><thead><tr><th style="text-align:left">通貨ペア</th><th>数量</th><th>内訳</th></tr></thead><tbody>`;
+      list.forEach(p => { g[p.pair] ||= {units:0, lots:0, buy:0, sell:0, swap:0}; g[p.pair].units += num(p.units); g[p.pair].lots += num(p.lots); g[p.pair][p.side === "sell" ? "sell" : "buy"]++; g[p.pair].swap += posDailySwap(p); });
+      html += `<div class="tablebox"><table class="sum" style="width:100%"><thead><tr><th style="text-align:left">通貨ペア</th><th>数量</th><th>スワップ</th><th>内訳</th></tr></thead><tbody>`;
       Object.entries(g).sort((a,c) => a[0].localeCompare(c[0])).forEach(([pair, agg]) => {
-        html += `<tr><td style="text-align:left">${esc(pair)}</td><td>${num(agg.units).toLocaleString("ja-JP")}通貨(${agg.lots}lot)</td><td>${agg.buy ? `<span class="tag tag-buy">買${agg.buy}</span>` : ""}${agg.sell ? `<span class="tag tag-sell">売${agg.sell}</span>` : ""}</td></tr>`;
+        html += `<tr><td style="text-align:left">${esc(pair)}</td><td>${num(agg.units).toLocaleString("ja-JP")}通貨(${agg.lots}lot)</td><td class="${cls(agg.swap)}">${signed(agg.swap)}</td><td>${agg.buy ? `<span class="tag tag-buy">買${agg.buy}</span>` : ""}${agg.sell ? `<span class="tag tag-sell">売${agg.sell}</span>` : ""}</td></tr>`;
       });
       html += `</tbody></table></div>`;
     } else {
@@ -520,12 +538,44 @@ function viewGoals(){
       <div class="goalstat">実績 ${yen(actual)}${pct != null ? `　目標 ${yen(target)}（${pct}%）` : "　目標未設定"}</div>
     </div>`;
   };
-  return `<section><h2>目標・実績</h2>
+  let html = `<section><h2>目標・実績</h2>
     <p class="hint">目標額を入力すると、直近の実績と比べた達成率を表示します。</p>
     ${row("月間スワップ", last ? monthly(last) : 0, g.monthlyTarget, "monthlyTarget")}
     ${row("年間スワップ", last ? yearly(last) : 0, g.yearlyTarget, "yearlyTarget")}
     ${row("元金", principal, g.principalTarget, "principalTarget")}
   </section>`;
+  html += `<section><h2>元金の目標（複数時点）<span class="act"><button class="linkbtn" data-act="addMilestone">＋ 追加</button></span></h2>`;
+  const ms = [...state.milestones].sort((a,b) => (a.targetDate||"").localeCompare(b.targetDate||""));
+  if (!ms.length){
+    html += `<div class="empty">「〇年〇月までに元金〇円」という目標を複数登録できます。<br><button class="btn" data-act="addMilestone">目標を追加</button></div>`;
+  } else {
+    ms.forEach(m => {
+      const pct = num(m.targetAmount) ? Math.min(100, Math.round(principal / num(m.targetAmount) * 100)) : null;
+      const [y, mo] = (m.targetDate||"").split("-");
+      html += `<button class="goalrow" data-edit-milestone="${esc(m.id)}" style="all:unset;display:block;width:100%;cursor:pointer;box-sizing:border-box">
+        <div class="goalhead"><span>${y}年${mo?Number(mo):""}月</span><span style="font-family:var(--serif);font-weight:700">${yen(num(m.targetAmount))}</span></div>
+        <div class="goalbar"><div class="goalfill" style="width:${pct ?? 0}%"></div></div>
+        <div class="goalstat">実績 ${yen(principal)}${pct != null ? `（${pct}%）` : ""}</div>
+      </button>`;
+    });
+  }
+  return html + `</section>`;
+}
+
+function openMilestone(m){
+  openSheet(m ? "目標を編集" : "目標を追加", `
+    ${field("目標の年月","targetDate", m?m.targetDate:"", "month")}
+    ${field("目標元金（円）","targetAmount", m&&m.targetAmount?num(m.targetAmount).toLocaleString("ja-JP"):"","text",'inputmode="numeric"')}
+    ${actions(!!m)}`);
+  const amt = $("#sheetIn").querySelector('[name="targetAmount"]');
+  amt.oninput = () => { amt.value = amt.value.replace(/[^\d]/g,""); };
+  wire(async () => {
+    const v = formVals();
+    if (!v.targetDate){ toast("年月を選んでください"); return; }
+    if (!num(v.targetAmount)){ toast("目標元金を入力してください"); return; }
+    if (!(await save("milestones", m ? m.id : null, {targetDate:v.targetDate, targetAmount:num(v.targetAmount)}))) return;
+    closeSheet(); toast("保存しました");
+  }, () => removeDoc("milestones", m.id));
 }
 
 function viewCash(){
@@ -551,14 +601,37 @@ let settingsView = null;
 function viewSettings(){
   if (settingsView === "basic") return viewSettingsBasic();
   if (settingsView === "cash") return viewSettingsCash();
+  if (settingsView === "swapmargin") return viewSettingsSwapMargin();
   return `<section><h2>設定</h2>
     <div class="setgrid">
       <button class="setbtn" data-panel="basic"><span class="t">基本情報</span><span class="d">取引単位・最小Lot数・建玉上限</span></button>
       <button class="setbtn" data-panel="cash"><span class="t">入出金</span><span class="d">入金・出金・キャッシュバックの記録</span></button>
+      <button class="setbtn" data-panel="swapmargin"><span class="t">スワップ/証拠金</span><span class="d">通貨ペアごとのスワップと必要証拠金</span></button>
     </div></section>`;
 }
 function viewSettingsCash(){
   return `<div class="subhead"><button class="linkbtn" data-back>← 設定</button></div>` + viewCash();
+}
+function viewSettingsSwapMargin(){
+  let html = `<div class="subhead"><button class="linkbtn" data-back>← 設定</button></div>
+    <h2 style="margin:8px 0 4px">スワップ/証拠金</h2>
+    <p class="hint">1Lotあたりのスワップ（買い、円/日）と必要証拠金（円）を証券会社の公表値から入力します。空欄の項目はチェックされません。</p>`;
+  BROKERS.forEach(b => {
+    html += `<div class="broker"><span>${esc(b)}</span></div>
+      <div class="tablebox"><table class="sum" style="width:100%"><thead><tr><th style="text-align:left">通貨ペア</th><th>スワップ(円/lot)</th><th>証拠金(円/lot)</th><th>証拠金÷SW</th></tr></thead><tbody>`;
+    pairsFor(b).forEach(pr => {
+      const cur = settingFor(b, pr);
+      const sw = cur && cur.swapPoint, mg = cur && cur.marginRequired;
+      const ratio = sw && mg && num(sw) !== 0 ? (num(mg) / num(sw)).toLocaleString("ja-JP",{maximumFractionDigits:1}) : "—";
+      html += `<tr><td style="text-align:left">${esc(pr)}</td>
+        <td><input class="fld-swap" data-broker="${esc(b)}" data-pair="${esc(pr)}" inputmode="decimal" placeholder="例:15" value="${sw != null ? sw : ''}" style="${inputStyle(70,'center')}"></td>
+        <td><input class="fld-margin" data-broker="${esc(b)}" data-pair="${esc(pr)}" inputmode="numeric" placeholder="例:5,000" value="${mg ? num(mg).toLocaleString('ja-JP') : ''}" style="${inputStyle(80,'center')}"></td>
+        <td>${ratio}${ratio !== "—" ? "日" : ""}</td>
+      </tr>`;
+    });
+    html += `</tbody></table></div>`;
+  });
+  return html;
 }
 function viewSettingsBasic(){
   let html = `<div class="subhead"><button class="linkbtn" data-back>← 設定</button></div>
@@ -583,12 +656,13 @@ function viewSettingsBasic(){
 
 function bindView(){
   const v = $("#view");
-  v.querySelectorAll("[data-act]").forEach(b => b.onclick = () => ({record:()=>openWeek(), addPos:()=>openPos(), addClosed:()=>openClosed(), addCash:()=>openCash(), toggleWeeks:()=>{weeksExpanded = !weeksExpanded; render();}})[b.dataset.act]());
+  v.querySelectorAll("[data-act]").forEach(b => b.onclick = () => ({record:()=>openWeek(), addPos:()=>openPos(), addClosed:()=>openClosed(), addCash:()=>openCash(), toggleWeeks:()=>{weeksExpanded = !weeksExpanded; render();}, swapBreakdown:()=>openSwapBreakdown(), addMilestone:()=>openMilestone()})[b.dataset.act]());
   v.querySelectorAll("[data-edit-week]").forEach(b => b.onclick = () => openWeek(state.weeks.find(w=>w.id===b.dataset.editWeek)));
   v.querySelectorAll("[data-edit-pos]").forEach(b => b.onclick = () => openPos(state.positions.find(w=>w.id===b.dataset.editPos)));
   v.querySelectorAll(".holdseg button").forEach(b => b.onclick = () => { holdView[b.parentNode.dataset.broker] = b.dataset.v; render(); });
   v.querySelectorAll("[data-edit-closed]").forEach(b => b.onclick = () => openClosed(state.closed.find(w=>w.id===b.dataset.editClosed)));
   v.querySelectorAll("[data-edit-cash]").forEach(b => b.onclick = () => openCash(state.cash.find(w=>w.id===b.dataset.editCash)));
+  v.querySelectorAll("[data-edit-milestone]").forEach(b => b.onclick = () => openMilestone(state.milestones.find(w=>w.id===b.dataset.editMilestone)));
   v.querySelectorAll("[data-panel]").forEach(b => b.onclick = () => { settingsView = b.dataset.panel; render(); });
   v.querySelectorAll("[data-back]").forEach(b => b.onclick = () => { settingsView = null; render(); });
   v.querySelectorAll(".fld-lot").forEach(i => {
@@ -604,6 +678,15 @@ function bindView(){
     i.dataset.orig = i.value;
     i.oninput = () => { i.value = i.value.replace(/[^\d]/g,""); };
     i.onblur = () => { if (i.value === i.dataset.orig) return; const n2 = num(i.value); i.value = n2 ? n2.toLocaleString("ja-JP") : ""; i.dataset.orig = i.value; saveSetting(i.dataset.broker, i.dataset.pair, {maxPosition:n2}); };
+  });
+  v.querySelectorAll(".fld-swap").forEach(i => {
+    i.dataset.orig = i.value;
+    i.onblur = async () => { if (i.value === i.dataset.orig) return; i.dataset.orig = i.value; if (await saveSetting(i.dataset.broker, i.dataset.pair, {swapPoint:i.value === "" ? null : num(i.value)})) render(); };
+  });
+  v.querySelectorAll(".fld-margin").forEach(i => {
+    i.dataset.orig = i.value;
+    i.oninput = () => { i.value = i.value.replace(/[^\d]/g,""); };
+    i.onblur = async () => { if (i.value === i.dataset.orig) return; const n2 = num(i.value); i.value = n2 ? n2.toLocaleString("ja-JP") : ""; i.dataset.orig = i.value; if (await saveSetting(i.dataset.broker, i.dataset.pair, {marginRequired:n2 || null})) render(); };
   });
   v.querySelectorAll(".fld-goal").forEach(i => {
     i.dataset.orig = i.value;
@@ -644,7 +727,8 @@ function openWeek(w){
   const ws = weeksSorted(), last = ws[ws.length-1];
   const hasCash = state.cash.length > 0;
   const principal = w ? w.principal : hasCash ? cashPrincipal() : last ? last.principal : 0;
-  const daily = w ? w.daily : last ? last.daily : 0;
+  const dailyAuto = state.positions.reduce((s2,p) => s2 + posDailySwap(p), 0);
+  const daily = w ? w.daily : dailyAuto;
   let brokers = w && w.brokers ? {...w.brokers} : {};
   if (!w){
     const names = [...new Set([...state.positions.map(p=>p.broker).filter(Boolean), ...Object.keys((last&&last.brokers)||{})])];
@@ -652,10 +736,10 @@ function openWeek(w){
   }
   const brokerHtml = () => Object.keys(brokers).map((n,i) => `<div class="brokerRow"><input data-bn="${i}" value="${esc(n)}" aria-label="業者名"><input data-bv="${i}" inputmode="decimal" placeholder="有効評価額" value="${esc(brokers[n])}" aria-label="${esc(n)}の有効評価額"><button class="x" data-bx="${i}" aria-label="削除">×</button></div>`).join("");
   openSheet(w ? `${fmtDate(w.date)} の記録` : "今週の記録", `
-    ${field("記録日","date", w ? w.date : today(), "date")}
+    <div style="max-width:160px">${field("記録日","date", w ? w.date : today(), "date")}</div>
     <div class="f"><span>業者ごとの有効評価額（合計が有効評価額になります）</span><div id="bRows">${brokerHtml()}</div><button class="linkbtn" id="bAdd">＋ 業者を追加</button></div>
     ${field("有効評価額（合計）","equity", w ? w.equity : "", "text", 'inputmode="decimal"')}
-    ${field("1日あたりスワップ","daily", daily, "text", 'inputmode="decimal"')}
+    ${field("1日あたりスワップ","daily", daily, "text", 'inputmode="decimal" style="background:var(--paper-2)"')}
     ${field("元金" + (!w && hasCash ? "（入出金から自動計算）" : ""),"principal", principal, "text", 'inputmode="decimal"')}
     <div class="calc" id="wcalc"></div>
     ${field("メモ","memo", w ? w.memo : "")}
@@ -688,10 +772,12 @@ function openPos(p){
   openSheet(p ? "ポジションを編集" : "ポジションを追加", `
     <div class="two">${select("証券会社","broker",p?p.broker:"",BROKERS)}${select("通貨ペア","pair",p?p.pair:"",pairsFor(p?p.broker:""))}</div>
     <div class="f"><span>売買</span>${seg("side", p ? p.side : "buy", [["buy","買い"],["sell","売り"]])}</div>
-    <div class="two">${field("Lot数","lots",p?p.lots:"","text",'inputmode="decimal"')}<label class="f"><span>数量（通貨）</span><div id="unitsCalc" style="padding:10px 12px;border:1px solid var(--line);border-radius:6px;background:var(--paper-2);font-weight:700">—</div></label></div>
+    <div class="two">
+      <label class="f"><span id="lotsLabel">発注数量</span><div style="display:flex;align-items:center;gap:6px"><input name="lots" type="text" inputmode="decimal" value="${p?p.lots:''}" style="flex:1 1 auto"><span id="lotsUnit" style="flex:0 0 auto;color:var(--ink-2);font-size:14px;white-space:nowrap">lot</span></div></label>
+      <label class="f"><span>数量（通貨）</span><div id="unitsCalc" style="padding:10px 12px;border:1px solid var(--line);border-radius:6px;background:var(--paper-2);font-weight:700">—</div></label>
+    </div>
     <p class="hint" id="capHint"></p>
-    ${field("建値レート","rate",p?p.rate:"","text",'inputmode="decimal"')}
-    ${field("建玉日","openDate",p?p.openDate:today(),"date")}
+    <div class="two">${field("建値レート","rate",p?p.rate:"","text",'inputmode="decimal"')}${field("建玉日","openDate",p?p.openDate:today(),"date")}</div>
     ${p ? `<button class="linkbtn" data-toclosed>このポジションを決済済みにする</button>` : ""}
     ${actions(!!p)}`);
   const s = $("#sheetIn");
@@ -704,8 +790,8 @@ function openPos(p){
     const v = formVals(), ls = lotSize(v.broker, v.pair), lots = num(v.lots), min = minLotOf(v.broker);
     const u = ls && lots ? lots * ls : null;
     s.querySelector("#unitsCalc").textContent = !v.broker || !v.pair ? "証券会社と通貨ペアを選んでください" : !ls ? "設定タブで取引単位を登録してください" : !lots ? "—" : u.toLocaleString("ja-JP") + "通貨";
-    const lotLabel = s.querySelector('[name="lots"]').previousElementSibling;
-    if (lotLabel) lotLabel.textContent = "Lot数" + (min != null ? `（最小 ${min}${minUnitLabel(v.broker)}）` : "");
+    s.querySelector("#lotsLabel").textContent = "発注数量" + (min != null ? `（最小 ${min}）` : "");
+    s.querySelector("#lotsUnit").textContent = v.broker ? minUnitLabel(v.broker) : "lot";
     const capRaw = maxPositionOf(v.broker, v.pair), capUnit = MAXPOS_UNIT[v.broker] || "lot";
     let capText = "";
     if (capRaw != null){
