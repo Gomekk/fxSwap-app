@@ -123,6 +123,17 @@ section h2 .act{font-family:var(--sans);font-size:13px;font-weight:500}
 .posc .pc-date{color:var(--ink-3);flex:0 0 auto}
 .posc .pc-units{flex:1 1 auto;text-align:right;color:var(--ink-2);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .posc .pc-rate{color:var(--ink-2);flex:0 0 auto;min-width:2.6em;text-align:right}
+.cashc{all:unset;box-sizing:border-box;display:flex;align-items:center;gap:8px;width:100%;padding:9px 2px;cursor:pointer;font-size:12.5px}
+.cashc .cc-date{color:var(--ink-3);flex:0 0 auto}
+.cashc .cc-broker{flex:1 1 auto;color:var(--ink-2);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cashc .cc-amt{flex:0 0 auto;font-weight:700;min-width:5em;text-align:right}
+.goalrow{margin:0 0 20px}
+.goalhead{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px}
+.goalhead span{font-family:var(--serif);font-weight:700;font-size:15px}
+.goalhead input{width:120px;padding:6px 8px;border:1px solid var(--line);border-radius:6px;background:var(--card);font-size:13px;text-align:right}
+.goalbar{height:8px;border-radius:4px;background:var(--paper-2);overflow:hidden;margin-bottom:4px}
+.goalfill{height:100%;background:var(--violet)}
+.goalstat{font-size:12.5px;color:var(--ink-2)}
 
 table.sum{width:100%;border-collapse:collapse;font-size:13px}
 .tablebox{overflow-x:auto;border:1px solid var(--line);border-radius:4px;background:var(--card)}
@@ -155,6 +166,7 @@ nav.tabs button[aria-selected="true"]{color:var(--ink);font-weight:700;border-to
 .two{display:grid;grid-template-columns:1fr 1fr;gap:0 12px}
 .seg{display:flex;border:1px solid var(--line);border-radius:6px;overflow:hidden}
 .seg button{flex:1;border:0;background:var(--card);padding:9px 0;font-size:14px;color:var(--ink-2)}
+.seg button:not(:first-child){border-left:1px solid var(--line)}
 .seg button[aria-pressed="true"]{background:var(--ink);color:var(--paper);font-weight:700}
 .calc{margin:6px 0 16px;padding:12px 14px;background:var(--paper-2);border-radius:6px;font-size:14px;display:grid;grid-template-columns:1fr auto;gap:4px 12px}
 .calc b{font-family:var(--serif);font-size:17px}
@@ -179,7 +191,7 @@ nav.tabs button[aria-selected="true"]{color:var(--ink);font-weight:700;border-to
   <button role="tab" data-tab="trend" aria-selected="true">ホーム</button>
   <button role="tab" data-tab="hold" aria-selected="false">保有</button>
   <button role="tab" data-tab="closed" aria-selected="false">決済</button>
-  <button role="tab" data-tab="cash" aria-selected="false">入出金</button>
+  <button role="tab" data-tab="goals" aria-selected="false">目標・実績</button>
   <button role="tab" data-tab="settings" aria-selected="false">設定</button>
 </div></nav>
 <div class="scrim" id="scrim"></div>
@@ -201,8 +213,8 @@ const pairsFor = broker => {
   PAIRS.forEach(p => { out.push(p); if (extra.has(p)) out.push(p + "(LIGHT)"); });
   return out;
 };
-const COLS = ["weeks","positions","closed","cash","settings"];
-const state = {weeks:[],positions:[],closed:[],cash:[],settings:[]};
+const COLS = ["weeks","positions","closed","cash","settings","goals"];
+const state = {weeks:[],positions:[],closed:[],cash:[],settings:[],goals:[]};
 let ready = false, authKnown = false, session = null, tab = "trend";
 
 const $ = s => document.querySelector(s);
@@ -239,8 +251,8 @@ const minViolation = (broker, lots, units) => {
 const inputStyle = (w, align="right") => `width:100%;max-width:${w}px;padding:6px 8px;border:1px solid var(--line);border-radius:6px;background:var(--card);font-size:14px;text-align:${align}`;
 
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-const TABLE = {weeks:"weeks", positions:"positions", closed:"closed_positions", cash:"cash_flows", settings:"settings"};
-const NUMS = new Set(["equity","principal","daily","units","swap","margin","fxPl","swapTotal","amount","lots","lotSize","minLot","maxPosition"]);
+const TABLE = {weeks:"weeks", positions:"positions", closed:"closed_positions", cash:"cash_flows", settings:"settings", goals:"goals"};
+const NUMS = new Set(["equity","principal","daily","units","swap","margin","fxPl","swapTotal","amount","lots","lotSize","minLot","maxPosition","monthlyTarget","yearlyTarget","principalTarget"]);
 const toSnake = k => k.replace(/[A-Z]/g, m => "_" + m.toLowerCase());
 const toCamel = k => k.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
 const fromRow = r => { const o = {}; for (const k in r){ const c = toCamel(k); o[c] = NUMS.has(c) && r[k] != null ? Number(r[k]) : r[k]; } return o; };
@@ -267,11 +279,20 @@ async function saveSetting(broker, pair, patch){
   toast("保存しました");
   return true;
 }
+async function saveGoal(patch){
+  const row = toRow(patch); row.user_id = session.user.id;
+  const { error } = await sb.from("goals").upsert(row, { onConflict: "user_id" });
+  if (error){ toast("保存できませんでした：" + error.message); return false; }
+  if (state.goals[0]) Object.assign(state.goals[0], patch); else state.goals.push({id:null, ...patch});
+  toast("保存しました");
+  return true;
+}
 async function save(col, id, data){
   const row = toRow(data); row.user_id = session.user.id;
   let q;
   if (col === "weeks" && !id) q = sb.from("weeks").upsert(row, { onConflict: "user_id,date" });
   else if (col === "settings" && !id) q = sb.from("settings").upsert(row, { onConflict: "user_id,broker,pair" });
+  else if (col === "goals" && !id) q = sb.from("goals").upsert(row, { onConflict: "user_id" });
   else if (id) q = sb.from(TABLE[col]).update(row).eq("id", id);
   else q = sb.from(TABLE[col]).insert(row);
   const { error } = await q;
@@ -342,10 +363,11 @@ function render(){
   if (!session){ $("#view").innerHTML = viewLogin(); bindLogin(); return; }
   document.querySelectorAll("nav.tabs button").forEach(b => b.setAttribute("aria-selected", b.dataset.tab === tab));
   const v = $("#view");
-  v.innerHTML = tab === "trend" ? viewTrend() : tab === "hold" ? viewHold() : tab === "closed" ? viewClosed() : tab === "cash" ? viewCash() : viewSettings();
+  v.innerHTML = tab === "trend" ? viewTrend() : tab === "hold" ? viewHold() : tab === "closed" ? viewClosed() : tab === "goals" ? viewGoals() : viewSettings();
   bindView();
 }
 
+let weeksExpanded = false;
 function viewTrend(){
   const ws = weeksSorted();
   const last = ws[ws.length-1], prev = ws[ws.length-2];
@@ -379,7 +401,8 @@ function viewTrend(){
   }
   html += `<section><h2>推移</h2>${chart(ws)}</section>`;
   html += `<section><h2>週ごとの記録<span class="act"><button class="linkbtn" data-act="record">＋ 記録</button></span></h2><ul class="rows">`;
-  for (let i = ws.length-1; i >= 0; i--){
+  const limit = weeksExpanded ? ws.length : Math.min(5, ws.length);
+  for (let i = ws.length-1, n = 0; i >= 0 && n < limit; i--, n++){
     const w = ws[i], p = ws[i-1], d = p ? w.equity - p.equity : null, pr = w.equity - w.principal;
     html += `<li><button class="row wk" data-edit-week="${esc(w.id)}">
       <span class="date">${fmtDate(w.date)}</span>
@@ -388,7 +411,7 @@ function viewTrend(){
       <span class="sub">利益 <span class="${cls(pr)}">${signed(pr)}</span>${d != null ? `　前週比 <span class="${cls(d)}">${signed(d)}</span>` : ""}</span>
     </button></li>`;
   }
-  html += `</ul></section>`;
+  html += `</ul>${ws.length > 5 ? `<div style="text-align:center;margin-top:8px"><button class="linkbtn" data-act="toggleWeeks">${weeksExpanded ? "閉じる" : "全表示"}</button></div>` : ""}</section>`;
   return html;
 }
 
@@ -485,6 +508,26 @@ function viewClosed(){
   return html + `</ul></section>`;
 }
 
+function viewGoals(){
+  const g = state.goals[0] || {};
+  const last = weeksSorted().slice(-1)[0];
+  const principal = cashPrincipal();
+  const row = (label, actual, target, key) => {
+    const pct = target ? Math.min(100, Math.round(actual / target * 100)) : null;
+    return `<div class="goalrow">
+      <div class="goalhead"><span>${label}</span><input class="fld-goal" data-key="${key}" inputmode="numeric" placeholder="目標を入力" value="${target ? num(target).toLocaleString('ja-JP') : ''}"></div>
+      <div class="goalbar"><div class="goalfill" style="width:${pct ?? 0}%"></div></div>
+      <div class="goalstat">実績 ${yen(actual)}${pct != null ? `　目標 ${yen(target)}（${pct}%）` : "　目標未設定"}</div>
+    </div>`;
+  };
+  return `<section><h2>目標・実績</h2>
+    <p class="hint">目標額を入力すると、直近の実績と比べた達成率を表示します。</p>
+    ${row("月間スワップ", last ? monthly(last) : 0, g.monthlyTarget, "monthlyTarget")}
+    ${row("年間スワップ", last ? yearly(last) : 0, g.yearlyTarget, "yearlyTarget")}
+    ${row("元金", principal, g.principalTarget, "principalTarget")}
+  </section>`;
+}
+
 function viewCash(){
   const cs = [...state.cash].sort((a,b) => (b.date||"").localeCompare(a.date||""));
   let html = `<section><h2>入出金<span class="act"><button class="linkbtn" data-act="addCash">＋ 追加</button></span></h2>`;
@@ -493,11 +536,12 @@ function viewCash(){
   const last = weeksSorted().slice(-1)[0];
   html += `<div class="calc"><span>元金（入金−出金）</span><b>${yen(inn-out)}</b><span>入金合計 / 出金合計</span><span>${yen(inn)} / ${yen(out)}</span><span>キャッシュバック合計</span><span class="gain">${yen(cb)}</span>${last ? `<span>最新の有効評価との差</span><span class="${cls(last.equity-(inn-out))}">${signed(last.equity-(inn-out))}</span>` : ""}</div><ul class="rows">`;
   cs.forEach(c => {
-    const label = c.kind === "out" ? "出金" : c.kind === "cashback" ? "キャッシュバック" : "入金";
-    html += `<li><button class="row pos" data-edit-cash="${esc(c.id)}">
-      <span class="p">${fmtDate(c.date)}<span class="tag">${label}</span></span>
-      <span class="v ${c.kind==="out"?"loss":c.kind==="cashback"?"gain":""}">${c.kind==="out"?"−":"+"}${yen(num(c.amount))}</span>
-      <span class="m">${esc(c.broker||"")}${c.memo ? "　" + esc(c.memo) : ""}</span><span></span>
+    const label = c.kind === "out" ? "出金" : c.kind === "cashback" ? "CB" : "入金";
+    html += `<li><button class="cashc" data-edit-cash="${esc(c.id)}">
+      <span class="cc-date">${fmtDate(c.date)}</span>
+      <span class="tag">${label}</span>
+      <span class="cc-broker">${esc(c.broker||"")}${c.memo ? "・" + esc(c.memo) : ""}</span>
+      <span class="cc-amt ${c.kind==="out"?"loss":c.kind==="cashback"?"gain":""}">${c.kind==="out"?"−":"+"}${yen(num(c.amount))}</span>
     </button></li>`;
   });
   return html + `</ul></section>`;
@@ -506,10 +550,15 @@ function viewCash(){
 let settingsView = null;
 function viewSettings(){
   if (settingsView === "basic") return viewSettingsBasic();
+  if (settingsView === "cash") return viewSettingsCash();
   return `<section><h2>設定</h2>
     <div class="setgrid">
       <button class="setbtn" data-panel="basic"><span class="t">基本情報</span><span class="d">取引単位・最小Lot数・建玉上限</span></button>
+      <button class="setbtn" data-panel="cash"><span class="t">入出金</span><span class="d">入金・出金・キャッシュバックの記録</span></button>
     </div></section>`;
+}
+function viewSettingsCash(){
+  return `<div class="subhead"><button class="linkbtn" data-back>← 設定</button></div>` + viewCash();
 }
 function viewSettingsBasic(){
   let html = `<div class="subhead"><button class="linkbtn" data-back>← 設定</button></div>
@@ -534,7 +583,7 @@ function viewSettingsBasic(){
 
 function bindView(){
   const v = $("#view");
-  v.querySelectorAll("[data-act]").forEach(b => b.onclick = () => ({record:()=>openWeek(), addPos:()=>openPos(), addClosed:()=>openClosed(), addCash:()=>openCash()})[b.dataset.act]());
+  v.querySelectorAll("[data-act]").forEach(b => b.onclick = () => ({record:()=>openWeek(), addPos:()=>openPos(), addClosed:()=>openClosed(), addCash:()=>openCash(), toggleWeeks:()=>{weeksExpanded = !weeksExpanded; render();}})[b.dataset.act]());
   v.querySelectorAll("[data-edit-week]").forEach(b => b.onclick = () => openWeek(state.weeks.find(w=>w.id===b.dataset.editWeek)));
   v.querySelectorAll("[data-edit-pos]").forEach(b => b.onclick = () => openPos(state.positions.find(w=>w.id===b.dataset.editPos)));
   v.querySelectorAll(".holdseg button").forEach(b => b.onclick = () => { holdView[b.parentNode.dataset.broker] = b.dataset.v; render(); });
@@ -555,6 +604,11 @@ function bindView(){
     i.dataset.orig = i.value;
     i.oninput = () => { i.value = i.value.replace(/[^\d]/g,""); };
     i.onblur = () => { if (i.value === i.dataset.orig) return; const n2 = num(i.value); i.value = n2 ? n2.toLocaleString("ja-JP") : ""; i.dataset.orig = i.value; saveSetting(i.dataset.broker, i.dataset.pair, {maxPosition:n2}); };
+  });
+  v.querySelectorAll(".fld-goal").forEach(i => {
+    i.dataset.orig = i.value;
+    i.oninput = () => { i.value = i.value.replace(/[^\d]/g,""); };
+    i.onblur = async () => { if (i.value === i.dataset.orig) return; const n2 = num(i.value); if (await saveGoal({[i.dataset.key]: n2 || null})) render(); };
   });
 }
 
@@ -770,7 +824,8 @@ function openClosedBody(pos, c, nested){
 function openCash(c){
   openSheet(c ? "入出金を編集" : "入出金を追加", `
     <div class="f"><span>種類</span>${seg("kind", c ? c.kind : "in", [["in","入金"],["out","出金"],["cashback","キャッシュバック"]])}</div>
-    <div class="two">${field("日付","date",c?c.date:today(),"date")}${field("金額（円）","amount",c&&c.amount?num(c.amount).toLocaleString("ja-JP"):"","text",'inputmode="numeric"')}</div>
+    ${field("日付","date",c?c.date:today(),"date")}
+    ${field("金額（円）","amount",c&&c.amount?num(c.amount).toLocaleString("ja-JP"):"","text",'inputmode="numeric"')}
     ${select("証券会社","broker",c?c.broker:BROKERS[0],BROKERS)}
     ${field("メモ","memo",c?c.memo:"")}
     ${actions(!!c)}`);
