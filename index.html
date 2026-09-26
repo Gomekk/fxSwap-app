@@ -127,7 +127,7 @@ section h2 .act{font-family:var(--sans);font-size:13px;font-weight:500}
 .cashc .cc-date{color:var(--ink-3);flex:0 0 auto}
 .cashc .cc-broker{flex:1 1 auto;color:var(--ink-2);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .cashc .cc-amt{flex:0 0 auto;font-weight:700;min-width:5em;text-align:right}
-.goalrow{margin:0 0 20px}
+.goalrow{margin:0 0 14px;padding:14px 16px;border:1px solid var(--line);border-radius:8px;background:var(--card)}
 .goalhead{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px}
 .goalhead span{font-family:var(--serif);font-weight:700;font-size:15px}
 .goalhead input{width:120px;padding:6px 8px;border:1px solid var(--line);border-radius:6px;background:var(--card);font-size:13px;text-align:right}
@@ -138,6 +138,8 @@ section h2 .act{font-family:var(--sans);font-size:13px;font-weight:500}
 table.sum{width:100%;border-collapse:collapse;font-size:13px}
 .tablebox{overflow-x:auto;border:1px solid var(--line);border-radius:4px;background:var(--card)}
 table.sum th,table.sum td{padding:8px 10px;text-align:right;white-space:nowrap;border-bottom:1px solid var(--line)}
+table.sum.tight th,table.sum.tight td{padding:6px 4px;font-size:12px}
+table.sum.tight th:first-child,table.sum.tight td:first-child{font-size:12.5px}
 table.sum th{font-weight:500;color:var(--ink-3);font-size:12px}
 table.sum th:first-child,table.sum td:first-child{text-align:left;font-weight:700}
 table.sum tr:last-child td{border-bottom:0}
@@ -419,7 +421,7 @@ function viewTrend(){
 function chart(ws){
   const data = ws.slice(-26);
   if (data.length < 2) return `<p class="hint">2週分以上の記録がたまるとグラフが表示されます。</p>`;
-  const W = window.innerWidth < 600 ? 400 : 680, H = window.innerWidth < 600 ? 230 : 250, L = 68, Rt = 78, T = 14, B = 30, iw = W-L-Rt, ih = H-T-B;
+  const W = window.innerWidth < 600 ? 460 : 720, H = window.innerWidth < 600 ? 230 : 250, L = 58, Rt = 66, T = 14, B = 30, iw = W-L-Rt, ih = H-T-B;
   const maxS = Math.max(...data.map(w => w.daily)) * 1.15 || 1;
   const eqs = data.map(w => w.equity), minE = Math.min(...eqs), maxE = Math.max(...eqs);
   const pad = (maxE - minE) * .25 || maxE*.1 || 1, e0 = Math.max(0, minE - pad), e1 = maxE + pad;
@@ -439,8 +441,12 @@ function chart(ws){
     const h = ih - (ys(w.daily)-T);
     s += `<rect x="${(xs(i)-bw*.32).toFixed(1)}" y="${ys(w.daily).toFixed(1)}" width="${(bw*.64).toFixed(1)}" height="${h.toFixed(1)}" fill="var(--bar)" rx="1"><title>${fmtDate(w.date)} 1日 ${yen(w.daily)}</title></rect>`;
   });
-  const step = Math.ceil(data.length/(W < 500 ? 5 : 8));
-  data.forEach((w,i) => { if (i % step === 0 || i === data.length-1) s += `<text x="${xs(i)}" y="${H-10}" text-anchor="middle" font-size="10.5" fill="var(--ink-3)">${fmtDate(w.date).slice(3)}</text>`; });
+  let lastMonth = null;
+  data.forEach((w,i) => {
+    const mo = (w.date||"").slice(0,7);
+    const show = i === 0 || i === data.length-1 || mo !== lastMonth;
+    if (show){ lastMonth = mo; s += `<text x="${xs(i)}" y="${H-10}" text-anchor="middle" font-size="10.5" fill="var(--ink-3)">${fmtDate(w.date).slice(3)}</text>`; }
+  });
   s += `<polyline points="${data.map((w,i)=>xs(i).toFixed(1)+","+ye(w.equity).toFixed(1)).join(" ")}" fill="none" stroke="var(--violet)" stroke-width="2.2" stroke-linejoin="round"/>`;
   data.forEach((w,i) => s += `<circle cx="${xs(i).toFixed(1)}" cy="${ye(w.equity).toFixed(1)}" r="3" fill="var(--card)" stroke="var(--violet)" stroke-width="1.6"><title>${fmtDate(w.date)} 有効評価 ${yen(w.equity)}</title></circle>`);
   s += `</svg>`;
@@ -530,6 +536,7 @@ function viewGoals(){
   const g = state.goals[0] || {};
   const last = weeksSorted().slice(-1)[0];
   const principal = cashPrincipal();
+  const dailySwapNow = state.positions.reduce((s2,p) => s2 + posDailySwap(p), 0);
   const row = (label, actual, target, key) => {
     const pct = target ? Math.min(100, Math.round(actual / target * 100)) : null;
     return `<div class="goalrow">
@@ -544,18 +551,18 @@ function viewGoals(){
     ${row("年間スワップ", last ? yearly(last) : 0, g.yearlyTarget, "yearlyTarget")}
     ${row("元金", principal, g.principalTarget, "principalTarget")}
   </section>`;
-  html += `<section><h2>元金の目標（複数時点）<span class="act"><button class="linkbtn" data-act="addMilestone">＋ 追加</button></span></h2>`;
+  html += `<section><h2>1日あたりスワップの目標（複数時点）<span class="act"><button class="linkbtn" data-act="addMilestone">＋ 追加</button></span></h2>`;
   const ms = [...state.milestones].sort((a,b) => (a.targetDate||"").localeCompare(b.targetDate||""));
   if (!ms.length){
-    html += `<div class="empty">「〇年〇月までに元金〇円」という目標を複数登録できます。<br><button class="btn" data-act="addMilestone">目標を追加</button></div>`;
+    html += `<div class="empty">「〇年〇月までに1日あたりスワップ〇円」という目標を複数登録できます。<br><button class="btn" data-act="addMilestone">目標を追加</button></div>`;
   } else {
     ms.forEach(m => {
-      const pct = num(m.targetAmount) ? Math.min(100, Math.round(principal / num(m.targetAmount) * 100)) : null;
+      const pct = num(m.targetAmount) ? Math.min(100, Math.round(dailySwapNow / num(m.targetAmount) * 100)) : null;
       const [y, mo] = (m.targetDate||"").split("-");
-      html += `<button class="goalrow" data-edit-milestone="${esc(m.id)}" style="all:unset;display:block;width:100%;cursor:pointer;box-sizing:border-box">
+      html += `<button class="goalrow" data-edit-milestone="${esc(m.id)}" style="all:unset;display:block;width:100%;cursor:pointer;box-sizing:border-box;margin-bottom:14px;padding:14px 16px;border:1px solid var(--line);border-radius:8px;background:var(--card)">
         <div class="goalhead"><span>${y}年${mo?Number(mo):""}月</span><span style="font-family:var(--serif);font-weight:700">${yen(num(m.targetAmount))}</span></div>
         <div class="goalbar"><div class="goalfill" style="width:${pct ?? 0}%"></div></div>
-        <div class="goalstat">実績 ${yen(principal)}${pct != null ? `（${pct}%）` : ""}</div>
+        <div class="goalstat">実績 ${yen(dailySwapNow)}${pct != null ? `（${pct}%）` : ""}</div>
       </button>`;
     });
   }
@@ -565,14 +572,14 @@ function viewGoals(){
 function openMilestone(m){
   openSheet(m ? "目標を編集" : "目標を追加", `
     ${field("目標の年月","targetDate", m?m.targetDate:"", "month")}
-    ${field("目標元金（円）","targetAmount", m&&m.targetAmount?num(m.targetAmount).toLocaleString("ja-JP"):"","text",'inputmode="numeric"')}
+    ${field("目標スワップ（円/日）","targetAmount", m&&m.targetAmount?num(m.targetAmount).toLocaleString("ja-JP"):"","text",'inputmode="numeric"')}
     ${actions(!!m)}`);
   const amt = $("#sheetIn").querySelector('[name="targetAmount"]');
   amt.oninput = () => { amt.value = amt.value.replace(/[^\d]/g,""); };
   wire(async () => {
     const v = formVals();
     if (!v.targetDate){ toast("年月を選んでください"); return; }
-    if (!num(v.targetAmount)){ toast("目標元金を入力してください"); return; }
+    if (!num(v.targetAmount)){ toast("目標スワップを入力してください"); return; }
     if (!(await save("milestones", m ? m.id : null, {targetDate:v.targetDate, targetAmount:num(v.targetAmount)}))) return;
     closeSheet(); toast("保存しました");
   }, () => removeDoc("milestones", m.id));
@@ -612,20 +619,30 @@ function viewSettings(){
 function viewSettingsCash(){
   return `<div class="subhead"><button class="linkbtn" data-back>← 設定</button></div>` + viewCash();
 }
+const BROKER_URLS = {
+  "外為どっとコム": {swap:"https://www.gaitame.com/service/fx/swap-cal.html", margin:"https://www.gaitame.com/service/fx/rules/pair.html"},
+  "GMOクリック証券": {swap:"https://www.click-sec.com/corp/guide/fxneo/swplog/", margin:null},
+  "みんなのFX": {swap:"https://min-fx.jp/market/swap/", margin:"https://min-fx.jp/market/marginlist/"},
+  "トライオートFX": {swap:"https://www.invast.jp/triauto/swap-calendar/#CHFTRY", margin:"https://www.invast.jp/triauto/rules/"},
+  "セントラル短資": {swap:"https://www.central-tanshifx.com/market/swapcalendar/", margin:null},
+};
 function viewSettingsSwapMargin(){
   let html = `<div class="subhead"><button class="linkbtn" data-back>← 設定</button></div>
     <h2 style="margin:8px 0 4px">スワップ/証拠金</h2>
-    <p class="hint">1Lotあたりのスワップ（買い、円/日）と必要証拠金（円）を証券会社の公表値から入力します。空欄の項目はチェックされません。</p>`;
+    <p class="hint">1Lotあたりのスワップ（円/日）と必要証拠金（円）を証券会社の公表値から入力します。見出しのリンクから公式ページを開けます。空欄の項目はチェックされません。</p>`;
   BROKERS.forEach(b => {
+    const urls = BROKER_URLS[b] || {};
+    const swHead = urls.swap ? `<a href="${urls.swap}" target="_blank" rel="noopener" style="color:inherit">スワップ</a>` : "スワップ";
+    const mgHead = urls.margin ? `<a href="${urls.margin}" target="_blank" rel="noopener" style="color:inherit">証拠金</a>` : "証拠金";
     html += `<div class="broker"><span>${esc(b)}</span></div>
-      <div class="tablebox"><table class="sum" style="width:100%"><thead><tr><th style="text-align:left">通貨ペア</th><th>スワップ(円/lot)</th><th>証拠金(円/lot)</th><th>証拠金÷SW</th></tr></thead><tbody>`;
+      <div class="tablebox"><table class="sum tight" style="width:100%"><thead><tr><th style="text-align:left">通貨ペア</th><th>${swHead}</th><th>${mgHead}</th><th>÷SW</th></tr></thead><tbody>`;
     pairsFor(b).forEach(pr => {
       const cur = settingFor(b, pr);
       const sw = cur && cur.swapPoint, mg = cur && cur.marginRequired;
       const ratio = sw && mg && num(sw) !== 0 ? (num(mg) / num(sw)).toLocaleString("ja-JP",{maximumFractionDigits:1}) : "—";
       html += `<tr><td style="text-align:left">${esc(pr)}</td>
-        <td><input class="fld-swap" data-broker="${esc(b)}" data-pair="${esc(pr)}" inputmode="decimal" placeholder="例:15" value="${sw != null ? sw : ''}" style="${inputStyle(70,'center')}"></td>
-        <td><input class="fld-margin" data-broker="${esc(b)}" data-pair="${esc(pr)}" inputmode="numeric" placeholder="例:5,000" value="${mg ? num(mg).toLocaleString('ja-JP') : ''}" style="${inputStyle(80,'center')}"></td>
+        <td><input class="fld-swap" data-broker="${esc(b)}" data-pair="${esc(pr)}" inputmode="decimal" placeholder="例:15" value="${sw != null ? sw : ''}" style="${inputStyle(48,'center')}"></td>
+        <td><input class="fld-margin" data-broker="${esc(b)}" data-pair="${esc(pr)}" inputmode="numeric" placeholder="例:5,000" value="${mg ? num(mg).toLocaleString('ja-JP') : ''}" style="${inputStyle(58,'center')}"></td>
         <td>${ratio}${ratio !== "—" ? "日" : ""}</td>
       </tr>`;
     });
@@ -740,7 +757,7 @@ function openWeek(w){
     <div class="f"><span>業者ごとの有効評価額（合計が有効評価額になります）</span><div id="bRows">${brokerHtml()}</div><button class="linkbtn" id="bAdd">＋ 業者を追加</button></div>
     ${field("有効評価額（合計）","equity", w ? w.equity : "", "text", 'inputmode="decimal"')}
     ${field("1日あたりスワップ","daily", daily, "text", 'inputmode="decimal" style="background:var(--paper-2)"')}
-    ${field("元金" + (!w && hasCash ? "（入出金から自動計算）" : ""),"principal", principal, "text", 'inputmode="decimal"')}
+    ${field("元金" + (!w && hasCash ? "（入出金から自動計算）" : ""),"principal", principal, "text", 'inputmode="decimal" style="background:var(--paper-2)"')}
     <div class="calc" id="wcalc"></div>
     ${field("メモ","memo", w ? w.memo : "")}
     ${actions(!!w)}`);
