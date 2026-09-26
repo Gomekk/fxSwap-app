@@ -238,6 +238,7 @@ const yearly = w => w.yearly != null ? w.yearly : w.daily * 365;
 const cashPrincipal = () => state.cash.reduce((s,c) => s + (c.kind === "out" ? -1 : c.kind === "cashback" ? 0 : 1) * num(c.amount), 0);
 const settingFor = (broker, pair) => state.settings.find(x => x.broker === broker && x.pair === pair);
 const lotSize = (broker, pair) => { const s = settingFor(broker, pair); return s && num(s.lotSize) > 0 ? num(s.lotSize) : null; };
+const orderUnitFactor = (broker, pair) => minUnitLabel(broker) === "万通貨" ? 10000 : lotSize(broker, pair);
 const minLotOf = broker => { const s = settingFor(broker, ""); return s && s.minLot !== "" && s.minLot != null ? num(s.minLot) : null; };
 const maxPositionOf = (broker, pair) => { const s = settingFor(broker, pair); return s && s.maxPosition !== "" && s.maxPosition != null ? num(s.maxPosition) : null; };
 const MAXPOS_UNIT = { "外為どっとコム":"lot", "GMOクリック証券":"lot", "みんなのFX":"lot", "トライオートFX":"万通貨", "セントラル短資":"万通貨" };
@@ -804,7 +805,7 @@ function openPos(p){
     pairSel.innerHTML = `<option value="" selected disabled>選択してください</option>` + opts.map(o => `<option>${esc(o)}</option>`).join("");
   });
   const recalc = () => {
-    const v = formVals(), ls = lotSize(v.broker, v.pair), lots = num(v.lots), min = minLotOf(v.broker);
+    const v = formVals(), ls = orderUnitFactor(v.broker, v.pair), lots = num(v.lots), min = minLotOf(v.broker);
     const u = ls && lots ? lots * ls : null;
     s.querySelector("#unitsCalc").textContent = !v.broker || !v.pair ? "証券会社と通貨ペアを選んでください" : !ls ? "設定タブで取引単位を登録してください" : !lots ? "—" : u.toLocaleString("ja-JP") + "通貨";
     s.querySelector("#lotsLabel").textContent = "発注数量" + (min != null ? `（最小 ${min}）` : "");
