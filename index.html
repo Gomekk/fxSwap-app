@@ -419,24 +419,52 @@ function viewTrend(){
   return html;
 }
 
+function niceNum(range, round){
+  if (!range || !isFinite(range)) range = 1;
+  const exp = Math.floor(Math.log10(range));
+  const frac = range / Math.pow(10, exp);
+  let niceFrac;
+  if (round){
+    if (frac < 1.5) niceFrac = 1;
+    else if (frac < 3) niceFrac = 2;
+    else if (frac < 7) niceFrac = 5;
+    else niceFrac = 10;
+  } else {
+    if (frac <= 1) niceFrac = 1;
+    else if (frac <= 2) niceFrac = 2;
+    else if (frac <= 5) niceFrac = 5;
+    else niceFrac = 10;
+  }
+  return niceFrac * Math.pow(10, exp);
+}
+function niceScale(min, max, ticks){
+  if (min === max){ min -= 1; max += 1; }
+  const step = niceNum((max - min) / (ticks - 1), true);
+  const niceMin = Math.floor(min / step) * step;
+  const niceMax = Math.ceil(max / step) * step;
+  return {min: niceMin, max: niceMax, step};
+}
 function chart(ws){
   const data = ws.slice(-26);
   if (data.length < 2) return `<p class="hint">2週分以上の記録がたまるとグラフが表示されます。</p>`;
   const W = window.innerWidth < 600 ? 460 : 720, H = window.innerWidth < 600 ? 230 : 250, L = 58, Rt = 66, T = 14, B = 30, iw = W-L-Rt, ih = H-T-B;
-  const maxS = Math.max(...data.map(w => w.daily)) * 1.15 || 1;
-  const eqs = data.map(w => w.equity), minE = Math.min(...eqs), maxE = Math.max(...eqs);
-  const pad = (maxE - minE) * .25 || maxE*.1 || 1, e0 = Math.max(0, minE - pad), e1 = maxE + pad;
+  const sScale = niceScale(0, Math.max(...data.map(w => w.daily), 0), 5);
+  const eqs = data.map(w => w.equity);
+  const eScale = niceScale(Math.min(...eqs), Math.max(...eqs), 5);
+  const s0 = sScale.min, s1 = sScale.max, e0 = eScale.min, e1 = eScale.max;
+  const ticks = Math.round((s1 - s0) / sScale.step);
   const bw = iw / data.length;
   const xs = i => L + bw*i + bw/2;
-  const ys = v => T + ih - v/maxS*ih;
+  const ys = v => T + ih - (v-s0)/(s1-s0)*ih;
   const ye = v => T + ih - (v-e0)/(e1-e0)*ih;
   const fnum = n => Math.round(n).toLocaleString("ja-JP");
   let s = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="1日あたりスワップと有効評価額の推移">`;
-  for (let g = 0; g <= 4; g++){
-    const y = T + ih*g/4;
+  for (let g = 0; g <= ticks; g++){
+    const sv = s0 + sScale.step*g, ev = e0 + (e1-e0)*g/ticks;
+    const y = ys(sv);
     s += `<line x1="${L}" x2="${W-Rt}" y1="${y}" y2="${y}" stroke="var(--line)" stroke-width="1"/>`;
-    s += `<text x="${L-6}" y="${y+4}" text-anchor="end" font-size="9.5" fill="var(--ink-3)">¥${fnum(maxS*(1-g/4))}</text>`;
-    s += `<text x="${W-Rt+6}" y="${y+4}" font-size="9.5" fill="var(--violet)">¥${fnum(e1-(e1-e0)*g/4)}</text>`;
+    s += `<text x="${L-6}" y="${y+4}" text-anchor="end" font-size="9.5" fill="var(--ink-3)">¥${fnum(sv)}</text>`;
+    s += `<text x="${W-Rt+6}" y="${y+4}" font-size="9.5" fill="var(--violet)">¥${fnum(ev)}</text>`;
   }
   data.forEach((w,i) => {
     const h = ih - (ys(w.daily)-T);
@@ -481,7 +509,7 @@ function viewHold(){
     const view = holdView[b] || "summary";
     const brokerDaily = list.reduce((s,p) => s + posDailySwap(p), 0);
     html += `<div class="broker"><span>${esc(b)}</span><span>1日 ${signed(brokerDaily)}</span></div>
-      <div class="holdseg" data-broker="${esc(b)}"><button data-v="summary" aria-pressed="${view==="summary"}">サマリー</button><button data-v="list" aria-pressed="${view==="list"}">一覧</button></div>`;
+      <div class="holdseg" data-broker="${esc(b)}"><button data-v="summary" aria-pressed="${view==="summary"}">サマリー</button><button data-v="list" aria-pressed="${view==="list"}">一覧</button></div><span style="font-size:12px;color:var(--ink-2);margin-left:8px">${list.length}件</span>`;
     if (view === "summary"){
       const g = {};
       list.forEach(p => { g[p.pair] ||= {units:0, lots:0, buy:0, sell:0, swap:0}; g[p.pair].units += num(p.units); g[p.pair].lots += num(p.lots); g[p.pair][p.side === "sell" ? "sell" : "buy"]++; g[p.pair].swap += posDailySwap(p); });
