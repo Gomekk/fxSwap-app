@@ -456,16 +456,13 @@ function chart(ws){
     const sv = s0 + sScale.step*g, ev = e0 + (e1-e0)*g/ticks;
     const y = ys(sv);
     s += `<line x1="${L}" x2="${W-Rt}" y1="${y}" y2="${y}" stroke="var(--line)" stroke-width="1"/>`;
-    s += `<text x="${L-6}" y="${y+4}" text-anchor="end" font-size="9.5" fill="var(--ink-3)">¥${fnum(sv)}</text>`;
-    s += `<text x="${W-Rt+6}" y="${y+4}" font-size="9.5" fill="var(--violet)">¥${fnum(ev)}</text>`;
+    s += `<text x="${L-6}" y="${y+4}" text-anchor="end" font-size="9.5" fill="var(--violet)">¥${fnum(sv)}</text>`;
+    s += `<text x="${W-Rt+6}" y="${y+4}" font-size="9.5" fill="var(--ink-3)">¥${fnum(ev)}</text>`;
   }
-  const swapW = bw*0.34, eqW = bw*0.34, gap = bw*0.06;
+  const eqW = bw*0.62;
   const yBase = ye(e0);
   data.forEach((w,i) => {
-    const cx = xs(i);
-    const sx = cx - gap/2 - swapW, sy = ys(w.daily);
-    s += `<rect x="${sx.toFixed(1)}" y="${sy.toFixed(1)}" width="${swapW.toFixed(1)}" height="${(ih-(sy-T)).toFixed(1)}" fill="var(--bar)" rx="1"><title>${fmtDate(w.date)} 1日 ${yen(w.daily)}</title></rect>`;
-    const ex = cx + gap/2, principal = Math.max(0, num(w.principal)), equity = num(w.equity), yTop = ye(equity);
+    const ex = xs(i) - eqW/2, principal = Math.max(0, num(w.principal)), equity = num(w.equity), yTop = ye(equity);
     if (equity >= principal){
       const yPrin = ye(principal);
       s += `<rect x="${ex.toFixed(1)}" y="${yPrin.toFixed(1)}" width="${eqW.toFixed(1)}" height="${(yBase-yPrin).toFixed(1)}" fill="var(--gold)" rx="1"><title>${fmtDate(w.date)} 元金 ${yen(principal)}</title></rect>`;
@@ -480,8 +477,10 @@ function chart(ws){
     const show = i === 0 || i === data.length-1 || mo !== lastMonth;
     if (show){ lastMonth = mo; s += `<text x="${xs(i)}" y="${H-10}" text-anchor="middle" font-size="10.5" fill="var(--ink-3)">${fmtDate(w.date).slice(3)}</text>`; }
   });
+  s += `<polyline points="${data.map((w,i)=>xs(i).toFixed(1)+","+ys(w.daily).toFixed(1)).join(" ")}" fill="none" stroke="var(--violet)" stroke-width="2.2" stroke-linejoin="round"/>`;
+  data.forEach((w,i) => s += `<circle cx="${xs(i).toFixed(1)}" cy="${ys(w.daily).toFixed(1)}" r="3" fill="var(--card)" stroke="var(--violet)" stroke-width="1.6"><title>${fmtDate(w.date)} 1日 ${yen(w.daily)}</title></circle>`);
   s += `</svg>`;
-  return `<div class="chart"><div class="legend"><span><i style="background:var(--bar)"></i>1日あたりスワップ（左）</span><span><i style="background:var(--gold)"></i>元金</span><span><i style="background:var(--gain)"></i>利益（右）</span></div>${s}</div>`;
+  return `<div class="chart"><div class="legend"><span><i style="background:var(--violet);height:3px;vertical-align:3px"></i>1日あたりスワップ（左）</span><span><i style="background:var(--gold)"></i>元金</span><span><i style="background:var(--gain)"></i>利益（右）</span></div>${s}</div>`;
 }
 
 function openSwapBreakdown(){
@@ -690,8 +689,7 @@ function viewSettingsSwapMargin(){
   const auto = swapMarginMode === "auto";
   let html = `<div class="subhead"><button class="linkbtn" data-back>← 設定</button></div>
     <h2 style="margin:8px 0 4px">スワップ/証拠金</h2>
-    <div class="seg mode-seg" style="max-width:220px;margin:10px 0"><button data-v="manual" aria-pressed="${!auto}">手動入力</button><button data-v="auto" aria-pressed="${auto}">自動取得</button></div>
-    ${auto ? `<div class="due" style="margin-bottom:14px"><p>自動取得は準備中です</p><button class="btn" data-act="fetchSwap">今すぐ取得</button></div>` : ""}
+    <div style="display:flex;align-items:center;gap:10px;margin:10px 0 12px"><div class="seg mode-seg" style="width:220px;flex:0 0 auto"><button data-v="manual" aria-pressed="${!auto}">手動入力</button><button data-v="auto" aria-pressed="${auto}">自動取得</button></div><button class="btn small" data-act="fetchSwap" ${auto ? "" : "disabled"}>記録する</button></div>
     <p class="hint">1Lotあたりのスワップ（円/日）と必要証拠金（円）を証券会社の公表値から入力します。見出しのリンクから公式ページを開けます。空欄の項目はチェックされません。</p>`;
   BROKERS.forEach(b => {
     const urls = BROKER_URLS[b] || {};
@@ -736,7 +734,7 @@ function viewSettingsBasic(){
 
 function bindView(){
   const v = $("#view");
-  v.querySelectorAll("[data-act]").forEach(b => b.onclick = () => ({record:()=>openWeek(), addPos:()=>openPos(), addClosed:()=>openClosed(), addCash:()=>openCash(), toggleWeeks:()=>{weeksExpanded = !weeksExpanded; render();}, swapBreakdown:()=>openSwapBreakdown(), addMilestone:()=>openMilestone(), fetchSwap:()=>toast("自動取得はまだ実装されていません。手動入力をご利用ください。")})[b.dataset.act]());
+  v.querySelectorAll("[data-act]").forEach(b => b.onclick = () => ({record:()=>openWeek(), addPos:()=>openPos(), addClosed:()=>openClosed(), addCash:()=>openCash(), toggleWeeks:()=>{weeksExpanded = !weeksExpanded; render();}, swapBreakdown:()=>openSwapBreakdown(), addMilestone:()=>openMilestone(), fetchSwap:()=>toast("自動取得はまだ実装されていません。手動入力に切り替えてご利用ください。")})[b.dataset.act]());
   v.querySelectorAll(".mode-seg button").forEach(b => b.onclick = () => { swapMarginMode = b.dataset.v; render(); });
   v.querySelectorAll("[data-edit-week]").forEach(b => b.onclick = () => openWeek(state.weeks.find(w=>w.id===b.dataset.editWeek)));
   v.querySelectorAll("[data-edit-pos]").forEach(b => b.onclick = () => openPos(state.positions.find(w=>w.id===b.dataset.editPos)));
