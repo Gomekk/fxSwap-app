@@ -684,12 +684,12 @@ const BROKER_URLS = {
   "トライオートFX": {swap:"https://www.invast.jp/triauto/swap-calendar/#CHFTRY", margin:"https://www.invast.jp/triauto/rules/"},
   "セントラル短資": {swap:"https://www.central-tanshifx.com/market/swapcalendar/", margin:null},
 };
-let swapMarginMode = "manual"; // "manual" | "auto"
+let swapMarginMode = "auto"; // "auto" | "manual"（既定は自動取得）
 function viewSettingsSwapMargin(){
   const auto = swapMarginMode === "auto";
   let html = `<div class="subhead"><button class="linkbtn" data-back>← 設定</button></div>
     <h2 style="margin:8px 0 4px">スワップ/証拠金</h2>
-    <div style="display:flex;align-items:center;gap:10px;margin:10px 0 12px"><div class="seg mode-seg" style="width:220px;flex:0 0 auto"><button data-v="manual" aria-pressed="${!auto}">手動入力</button><button data-v="auto" aria-pressed="${auto}">自動取得</button></div><button class="btn small" data-act="fetchSwap" ${auto ? "" : "disabled"}>記録する</button></div>
+    <div style="display:flex;align-items:center;gap:10px;margin:10px 0 12px"><div class="seg mode-seg" style="width:220px;flex:0 0 auto"><button data-v="auto" aria-pressed="${auto}">自動取得</button><button data-v="manual" aria-pressed="${!auto}">手動入力</button></div><button class="btn small" data-act="fetchSwap" ${auto ? "" : "disabled"}>記録する</button></div>
     <p class="hint">1Lotあたりのスワップ（円/日）と必要証拠金（円）を証券会社の公表値から入力します。見出しのリンクから公式ページを開けます。空欄の項目はチェックされません。</p>`;
   BROKERS.forEach(b => {
     const urls = BROKER_URLS[b] || {};
