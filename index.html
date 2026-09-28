@@ -141,6 +141,8 @@ table.sum th,table.sum td{padding:8px 10px;text-align:right;white-space:nowrap;b
 table.sum.tight th,table.sum.tight td{padding:6px 4px;font-size:12px}
 table.sum.tight th:first-child,table.sum.tight td:first-child{font-size:12.5px}
 table.sum.tight input:disabled{opacity:.5;background:var(--paper-2)}
+.sidebtn{background:none;border:1px solid currentColor;border-radius:3px;font-size:11px;padding:2px 4px;margin-left:3px;cursor:pointer;vertical-align:middle}
+.sidebtn:disabled{opacity:.5;cursor:default}
 table.sum th{font-weight:500;color:var(--ink-3);font-size:12px}
 table.sum th:first-child,table.sum td:first-child{text-align:left;font-weight:700}
 table.sum tr:last-child td{border-bottom:0}
@@ -178,7 +180,7 @@ nav.tabs button[aria-selected="true"]{color:var(--ink);font-weight:700;border-to
 .x{background:none;border:0;color:var(--ink-3);font-size:18px;padding:4px 6px}
 .actions{display:flex;gap:10px;justify-content:space-between;margin-top:18px}
 .actions .right{display:flex;gap:10px;margin-left:auto}
-.toast{position:fixed;left:50%;bottom:84px;transform:translateX(-50%);background:var(--ink);color:var(--paper);padding:8px 16px;border-radius:999px;font-size:13px;z-index:30;opacity:0;transition:opacity .2s;pointer-events:none}
+.toast{position:fixed;left:50%;bottom:84px;transform:translateX(-50%);background:var(--ink);color:var(--paper);padding:8px 16px;border-radius:18px;font-size:13px;z-index:30;opacity:0;transition:opacity .2s;pointer-events:none;white-space:pre-line;text-align:center;max-width:88vw}
 .toast.show{opacity:1}
 [hidden]{display:none!important}
 @media (prefers-reduced-motion:reduce){.sheet,.toast{transition:none}}
@@ -231,7 +233,7 @@ const addDays = (s,n) => { const d = new Date(s + "T00:00:00"); d.setDate(d.getD
 const fmtDate = s => s ? s.slice(2).replace(/-/g,"/") : "";
 const daysBetween = (a,b) => Math.round((new Date(b+"T00:00:00") - new Date(a+"T00:00:00"))/864e5);
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2,7);
-const toast = msg => { const t = $("#toast"); t.textContent = msg; t.classList.add("show"); clearTimeout(toast.h); toast.h = setTimeout(() => t.classList.remove("show"), 1800); };
+const toast = (msg, ms = 1800) => { const t = $("#toast"); t.textContent = msg; t.classList.add("show"); clearTimeout(toast.h); toast.h = setTimeout(() => t.classList.remove("show"), ms); };
 
 const weeksSorted = () => [...state.weeks].sort((a,b) => a.date < b.date ? -1 : 1);
 const monthly = w => w.monthly != null ? w.monthly : w.daily * 30;
@@ -254,7 +256,8 @@ const minViolation = (broker, lots, units) => {
 };
 const swapPointOf = (broker, pair) => { const s = settingFor(broker, pair); return s && s.swapPoint !== "" && s.swapPoint != null ? num(s.swapPoint) : null; };
 const marginRequiredOf = (broker, pair) => { const s = settingFor(broker, pair); return s && s.marginRequired !== "" && s.marginRequired != null ? num(s.marginRequired) : null; };
-const posDailySwap = p => { const sp = swapPointOf(p.broker, p.pair); return sp == null ? 0 : sp * num(p.lots) * (p.side === "sell" ? -1 : 1); };
+const swapSideOf = (broker, pair) => { const s = settingFor(broker, pair); return s && s.swapSide === "sell" ? "sell" : "buy"; };
+const posDailySwap = p => { const sp = swapPointOf(p.broker, p.pair); if (sp == null) return 0; const dir = (p.side === "sell" ? "sell" : "buy") === swapSideOf(p.broker, p.pair) ? 1 : -1; return sp * (num(p.units) / 10000) * dir; };
 const inputStyle = (w, align="right") => `width:100%;max-width:${w}px;padding:6px 8px;border:1px solid var(--line);border-radius:6px;background:var(--card);font-size:14px;text-align:${align}`;
 
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
@@ -285,6 +288,45 @@ async function saveSetting(broker, pair, patch){
   if (s) Object.assign(s, patch); else state.settings.push({id:null, broker, pair, ...patch});
   toast("保存しました");
   return true;
+}
+async function saveSettingsBatch(broker, items){
+  const rows = items.map(it => { const r = toRow({broker, pair: it.pair, swapPoint: it.swapPoint, swapSide: it.swapSide}); r.user_id = session.user.id; return r; });
+  const { error } = await sb.from("settings").upsert(rows, { onConflict: "user_id,broker,pair" });
+  if (error){ toast("保存できませんでした：" + error.message, 4000); return false; }
+  items.forEach(it => {
+    const patch = {swapPoint: it.swapPoint, swapSide: it.swapSide};
+    const cur = state.settings.find(x => x.broker === broker && x.pair === it.pair);
+    if (cur) Object.assign(cur, patch); else state.settings.push({id:null, broker, pair: it.pair, ...patch});
+  });
+  return true;
+}
+/* 自動取得：取り扱いペア（基本情報の取引単位か建玉上限が入力済み）だけを、Edge Functionから取得して保存 */
+const FETCHABLE = ["外為どっとコム"];
+let swapAsOf = {}, swapFetching = false;
+const isHandled = (b, pr) => { const c = settingFor(b, pr); return !!(c && (num(c.lotSize) > 0 || num(c.maxPosition) > 0)); };
+async function fetchSwapAuto(){
+  if (swapFetching) return;
+  swapFetching = true; render();
+  const notes = [];
+  try {
+    for (const b of FETCHABLE){
+      const pairs = pairsFor(b).filter(pr => isHandled(b, pr));
+      if (!pairs.length){ notes.push(`${b}：基本情報に取り扱いペア（取引単位か建玉上限）がありません`); continue; }
+      const { data, error } = await sb.functions.invoke("fetch-swap", { body: { broker: b, pairs } });
+      if (error || !data || data.error){ notes.push(`${b}：${(data && data.error) || (error && error.message) || "取得に失敗しました"}`); continue; }
+      const items = (data.results || []).map(r => ({pair: r.pair, swapPoint: r.swapPer10k, swapSide: r.side}));
+      if (items.length && await saveSettingsBatch(b, items)){
+        swapAsOf[b] = items.length ? data.results.map(r => r.date).sort().slice(-1)[0] : null;
+        notes.push(`${b}：${items.length}件を更新（${fmtDate(swapAsOf[b])}分）`);
+      }
+      if ((data.skipped || []).length) notes.push(`${b}：取得できなかったペア ${data.skipped.map(x => x.pair).join("、")}`);
+    }
+    notes.push("他社は未対応");
+  } catch (e) {
+    notes.push("取得に失敗しました：" + ((e && e.message) || e));
+  } finally {
+    swapFetching = false; render(); toast(notes.join("\n"), 6000);
+  }
 }
 async function save(col, id, data){
   const row = toRow(data); row.user_id = session.user.id;
@@ -689,20 +731,20 @@ function viewSettingsSwapMargin(){
   const auto = swapMarginMode === "auto";
   let html = `<div class="subhead"><button class="linkbtn" data-back>← 設定</button></div>
     <h2 style="margin:8px 0 4px">スワップ/証拠金</h2>
-    <div style="display:flex;align-items:center;gap:10px;margin:10px 0 12px"><div class="seg mode-seg" style="width:220px;flex:0 0 auto"><button data-v="auto" aria-pressed="${auto}">自動取得</button><button data-v="manual" aria-pressed="${!auto}">手動入力</button></div><button class="btn small" data-act="fetchSwap" ${auto ? "" : "disabled"}>記録する</button></div>
-    <p class="hint">1Lotあたりのスワップ（円/日）と必要証拠金（円）を証券会社の公表値から入力します。見出しのリンクから公式ページを開けます。空欄の項目はチェックされません。</p>`;
+    <div style="display:flex;align-items:center;gap:10px;margin:10px 0 12px"><div class="seg mode-seg" style="width:220px;flex:0 0 auto"><button data-v="auto" aria-pressed="${auto}">自動取得</button><button data-v="manual" aria-pressed="${!auto}">手動入力</button></div><button class="btn small" data-act="fetchSwap" ${auto && !swapFetching ? "" : "disabled"}>${swapFetching ? "取得中…" : "記録する"}</button></div>
+    <p class="hint">スワップ（円/日）と証拠金（円）は、全社「1万通貨あたり」に換算して入力します（自動取得した値も1万通貨あたりに換算して保存します）。スワップは買い・売りのうちプラスになる方を、数字の右の「買/売」で選びます。見出しのリンクから公式ページを開けます。空欄の項目はチェックされません。</p>`;
   BROKERS.forEach(b => {
     const urls = BROKER_URLS[b] || {};
     const swHead = urls.swap ? `<a href="${urls.swap}" target="_blank" rel="noopener" style="color:inherit">スワップ</a>` : "スワップ";
     const mgHead = urls.margin ? `<a href="${urls.margin}" target="_blank" rel="noopener" style="color:inherit">証拠金</a>` : "証拠金";
-    html += `<div class="broker"><span>${esc(b)}</span></div>
+    html += `<div class="broker"><span>${esc(b)}</span><span style="font-weight:500;font-size:12px">${swapAsOf[b] ? `取得 ${fmtDate(swapAsOf[b])}分` : (FETCHABLE.includes(b) ? "" : "自動取得は未対応")}</span></div>
       <div class="tablebox"><table class="sum tight" style="width:100%"><thead><tr><th style="text-align:left">通貨ペア</th><th>${swHead}</th><th>${mgHead}</th><th>÷SW</th></tr></thead><tbody>`;
     pairsFor(b).forEach(pr => {
       const cur = settingFor(b, pr);
       const sw = cur && cur.swapPoint, mg = cur && cur.marginRequired;
       const ratio = sw && mg && num(sw) !== 0 ? (num(mg) / num(sw)).toLocaleString("ja-JP",{maximumFractionDigits:1}) : "—";
       html += `<tr><td style="text-align:left">${esc(pr)}</td>
-        <td><input class="fld-swap" data-broker="${esc(b)}" data-pair="${esc(pr)}" inputmode="decimal" placeholder="15" value="${sw != null ? sw : ''}" style="${inputStyle(38,'center')}" ${auto?"disabled":""}></td>
+        <td><input class="fld-swap" data-broker="${esc(b)}" data-pair="${esc(pr)}" inputmode="decimal" placeholder="15" value="${sw != null ? sw : ''}" style="${inputStyle(38,'center')}" ${auto?"disabled":""}><button class="sidebtn ${swapSideOf(b,pr)==="sell"?"tag-sell":"tag-buy"}" data-broker="${esc(b)}" data-pair="${esc(pr)}" ${auto?"disabled":""}>${swapSideOf(b,pr)==="sell"?"売":"買"}</button></td>
         <td><input class="fld-margin" data-broker="${esc(b)}" data-pair="${esc(pr)}" inputmode="numeric" placeholder="5000" value="${mg ? num(mg).toLocaleString('ja-JP') : ''}" style="${inputStyle(46,'center')}" ${auto?"disabled":""}></td>
         <td>${ratio}${ratio !== "—" ? "日" : ""}</td>
       </tr>`;
@@ -734,7 +776,7 @@ function viewSettingsBasic(){
 
 function bindView(){
   const v = $("#view");
-  v.querySelectorAll("[data-act]").forEach(b => b.onclick = () => ({record:()=>openWeek(), addPos:()=>openPos(), addClosed:()=>openClosed(), addCash:()=>openCash(), toggleWeeks:()=>{weeksExpanded = !weeksExpanded; render();}, swapBreakdown:()=>openSwapBreakdown(), addMilestone:()=>openMilestone(), fetchSwap:()=>toast("自動取得はまだ実装されていません。手動入力に切り替えてご利用ください。")})[b.dataset.act]());
+  v.querySelectorAll("[data-act]").forEach(b => b.onclick = () => ({record:()=>openWeek(), addPos:()=>openPos(), addClosed:()=>openClosed(), addCash:()=>openCash(), toggleWeeks:()=>{weeksExpanded = !weeksExpanded; render();}, swapBreakdown:()=>openSwapBreakdown(), addMilestone:()=>openMilestone(), fetchSwap:()=>fetchSwapAuto()})[b.dataset.act]());
   v.querySelectorAll(".mode-seg button").forEach(b => b.onclick = () => { swapMarginMode = b.dataset.v; render(); });
   v.querySelectorAll("[data-edit-week]").forEach(b => b.onclick = () => openWeek(state.weeks.find(w=>w.id===b.dataset.editWeek)));
   v.querySelectorAll("[data-edit-pos]").forEach(b => b.onclick = () => openPos(state.positions.find(w=>w.id===b.dataset.editPos)));
@@ -758,6 +800,7 @@ function bindView(){
     i.oninput = () => { i.value = i.value.replace(/[^\d]/g,""); };
     i.onblur = () => { if (i.value === i.dataset.orig) return; const n2 = num(i.value); i.value = n2 ? n2.toLocaleString("ja-JP") : ""; i.dataset.orig = i.value; saveSetting(i.dataset.broker, i.dataset.pair, {maxPosition:n2}); };
   });
+  v.querySelectorAll(".sidebtn").forEach(bn => bn.onclick = async () => { const b = bn.dataset.broker, pr = bn.dataset.pair; if (await saveSetting(b, pr, {swapSide: swapSideOf(b, pr) === "sell" ? "buy" : "sell"})) render(); });
   v.querySelectorAll(".fld-swap").forEach(i => {
     i.dataset.orig = i.value;
     i.onblur = async () => { if (i.value === i.dataset.orig) return; i.dataset.orig = i.value; if (await saveSetting(i.dataset.broker, i.dataset.pair, {swapPoint:i.value === "" ? null : num(i.value)})) render(); };
