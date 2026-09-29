@@ -260,7 +260,20 @@ const swapSideOf = (broker, pair) => { const s = settingFor(broker, pair); retur
 const posDailySwap = p => { const sp = swapPointOf(p.broker, p.pair); if (sp == null) return 0; const dir = (p.side === "sell" ? "sell" : "buy") === swapSideOf(p.broker, p.pair) ? 1 : -1; return sp * (num(p.units) / 10000) * dir; };
 const inputStyle = (w, align="right") => `width:100%;max-width:${w}px;padding:6px 8px;border:1px solid var(--line);border-radius:6px;background:var(--card);font-size:14px;text-align:${align}`;
 
-const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+/* Supabase側の一時的な不具合（PGRST303 "JWT issued at future"）は、少し待つと通るため自動で再試行する */
+const RETRY_MS = 1000;
+const retryFetch = async (url, opts) => {
+  let res;
+  for (let i = 0; i < 4; i++){
+    res = await fetch(url, opts);
+    if (res.status !== 401) return res;
+    const body = await res.clone().text().catch(() => "");
+    if (!/PGRST303|JWT issued at future/i.test(body)) return res;
+    if (i < 3) await new Promise(r => setTimeout(r, RETRY_MS * (i + 1)));
+  }
+  return res;
+};
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY, { global: { fetch: retryFetch } });
 const TABLE = {weeks:"weeks", positions:"positions", closed:"closed_positions", cash:"cash_flows", settings:"settings", goals:"goals", milestones:"goal_milestones"};
 const NUMS = new Set(["equity","principal","daily","units","swap","margin","fxPl","swapTotal","amount","lots","lotSize","minLot","maxPosition","monthlyTarget","yearlyTarget","principalTarget","swapPoint","marginRequired","targetAmount","targetEquity"]);
 const toSnake = k => k.replace(/[A-Z]/g, m => "_" + m.toLowerCase());
@@ -270,7 +283,7 @@ const toRow = d => { const o = {}; for (const k in d){ if (k === "id") continue;
 
 async function load(col){
   const { data, error } = await sb.from(TABLE[col]).select("*");
-  if (error){ $("#status").textContent = "読み込みエラー：" + error.message; return; }
+  if (error){ $("#status").textContent = "読み込みエラー：" + error.message + (/JWT issued at future|PGRST303/i.test(error.message) ? "（Supabase側の一時的な不具合です。少し待ってから開き直してください）" : ""); return; }
   state[col] = data.map(fromRow);
 }
 async function loadAll(){
@@ -301,7 +314,7 @@ async function saveSettingsBatch(broker, items){
   return true;
 }
 /* 自動取得：取り扱いペア（基本情報の取引単位か建玉上限が入力済み）だけを、Edge Functionから取得して保存 */
-const FETCHABLE = ["外為どっとコム"];
+const FETCHABLE = ["外為どっとコム", "GMOクリック証券", "みんなのFX", "トライオートFX", "セントラル短資"];
 let swapAsOf = {}, swapFetching = false;
 const isHandled = (b, pr) => { const c = settingFor(b, pr); return !!(c && (num(c.lotSize) > 0 || num(c.maxPosition) > 0)); };
 async function fetchSwapAuto(){
@@ -321,7 +334,6 @@ async function fetchSwapAuto(){
       }
       if ((data.skipped || []).length) notes.push(`${b}：取得できなかったペア ${data.skipped.map(x => x.pair).join("、")}`);
     }
-    notes.push("他社は未対応");
   } catch (e) {
     notes.push("取得に失敗しました：" + ((e && e.message) || e));
   } finally {
