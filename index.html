@@ -138,8 +138,8 @@ section h2 .act{font-family:var(--sans);font-size:13px;font-weight:500}
 table.sum{width:100%;border-collapse:collapse;font-size:13px}
 .tablebox{overflow-x:auto;border:1px solid var(--line);border-radius:4px;background:var(--card)}
 table.sum th,table.sum td{padding:8px 10px;text-align:right;white-space:nowrap;border-bottom:1px solid var(--line)}
-table.sum.tight th,table.sum.tight td{padding:6px 4px;font-size:12px}
-table.sum.tight th:first-child,table.sum.tight td:first-child{font-size:12.5px}
+table.sum.tight th,table.sum.tight td{padding:6px 2px;font-size:12px}
+table.sum.tight th:first-child,table.sum.tight td:first-child{font-size:12.5px;padding-right:1px}
 table.sum.tight input:disabled{opacity:.5;background:var(--paper-2)}
 .sidebtn{background:none;border:1px solid currentColor;border-radius:3px;font-size:11px;padding:2px 4px;margin-left:3px;cursor:pointer;vertical-align:middle}
 .sidebtn:disabled{opacity:.5;cursor:default}
@@ -218,8 +218,8 @@ const pairsFor = broker => {
   PAIRS.forEach(p => { out.push(p); if (extra.has(p)) out.push(p + "(LIGHT)"); });
   return out;
 };
-const COLS = ["weeks","positions","closed","cash","settings","goals","milestones"];
-const state = {weeks:[],positions:[],closed:[],cash:[],settings:[],goals:[],milestones:[]};
+const COLS = ["weeks","positions","closed","cash","settings","goals","milestones","swapHistory"];
+const state = {weeks:[],positions:[],closed:[],cash:[],settings:[],goals:[],milestones:[],swapHistory:[]};
 let ready = false, authKnown = false, session = null, tab = "trend";
 
 const $ = s => document.querySelector(s);
@@ -274,7 +274,7 @@ const retryFetch = async (url, opts) => {
   return res;
 };
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY, { global: { fetch: retryFetch } });
-const TABLE = {weeks:"weeks", positions:"positions", closed:"closed_positions", cash:"cash_flows", settings:"settings", goals:"goals", milestones:"goal_milestones"};
+const TABLE = {weeks:"weeks", positions:"positions", closed:"closed_positions", cash:"cash_flows", settings:"settings", goals:"goals", milestones:"goal_milestones", swapHistory:"swap_history"};
 const NUMS = new Set(["equity","principal","daily","units","swap","margin","fxPl","swapTotal","amount","lots","lotSize","minLot","maxPosition","monthlyTarget","yearlyTarget","principalTarget","swapPoint","marginRequired","targetAmount","targetEquity"]);
 const toSnake = k => k.replace(/[A-Z]/g, m => "_" + m.toLowerCase());
 const toCamel = k => k.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
@@ -292,6 +292,7 @@ async function loadAll(){
   ready = true;
   if ($("#status").textContent === "読み込み中…") $("#status").textContent = "";
   render();
+  autoFetchOncePerDay();
 }
 async function saveSetting(broker, pair, patch){
   const row = toRow({broker, pair, ...patch}); row.user_id = session.user.id;
@@ -317,28 +318,49 @@ async function saveSettingsBatch(broker, items){
 const FETCHABLE = ["外為どっとコム", "GMOクリック証券", "みんなのFX", "トライオートFX", "セントラル短資"];
 let swapAsOf = {}, swapFetching = false;
 const isHandled = (b, pr) => { const c = settingFor(b, pr); return !!(c && (num(c.lotSize) > 0 || num(c.maxPosition) > 0)); };
-async function fetchSwapAuto(){
+const weekSunday = dateStr => { const d = new Date(dateStr + "T00:00:00"); d.setDate(d.getDate() - d.getDay()); return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0"); };
+async function archiveSwapHistory(broker, results){
+  if (!results.length) return;
+  const date = weekSunday(today());
+  const rows = results.map(r => { const row = toRow({date, broker, pair: r.pair, swapPoint: r.swapPer10k}); row.user_id = session.user.id; return row; });
+  const { error } = await sb.from("swap_history").upsert(rows, { onConflict: "user_id,date,broker,pair" });
+  if (error) return;
+  results.forEach(r => {
+    const cur = state.swapHistory.find(h => h.date === date && h.broker === broker && h.pair === r.pair);
+    if (cur) cur.swapPoint = r.swapPer10k; else state.swapHistory.push({id:null, date, broker, pair: r.pair, swapPoint: r.swapPer10k});
+  });
+}
+async function fetchSwapAuto(silent){
   if (swapFetching) return;
-  swapFetching = true; render();
+  swapFetching = true; if (!silent) render();
   const notes = [];
   try {
     for (const b of FETCHABLE){
       const pairs = pairsFor(b).filter(pr => isHandled(b, pr));
-      if (!pairs.length){ notes.push(`${b}：基本情報に取り扱いペア（取引単位か建玉上限）がありません`); continue; }
+      if (!pairs.length){ if (!silent) notes.push(`${b}：基本情報に取り扱いペア（取引単位か建玉上限）がありません`); continue; }
       const { data, error } = await sb.functions.invoke("fetch-swap", { body: { broker: b, pairs } });
       if (error || !data || data.error){ notes.push(`${b}：${(data && data.error) || (error && error.message) || "取得に失敗しました"}`); continue; }
       const items = (data.results || []).map(r => ({pair: r.pair, swapPoint: r.swapPer10k, swapSide: r.side}));
       if (items.length && await saveSettingsBatch(b, items)){
         swapAsOf[b] = items.length ? data.results.map(r => r.date).sort().slice(-1)[0] : null;
-        notes.push(`${b}：${items.length}件を更新（${fmtDate(swapAsOf[b])}分）`);
+        await archiveSwapHistory(b, data.results);
+        if (!silent) notes.push(`${b}：${items.length}件を更新（${fmtDate(swapAsOf[b])}分）`);
       }
-      if ((data.skipped || []).length) notes.push(`${b}：取得できなかったペア ${data.skipped.map(x => x.pair).join("、")}`);
+      if (!silent && (data.skipped || []).length) notes.push(`${b}：取得できなかったペア ${data.skipped.map(x => x.pair).join("、")}`);
     }
   } catch (e) {
     notes.push("取得に失敗しました：" + ((e && e.message) || e));
   } finally {
-    swapFetching = false; render(); toast(notes.join("\n"), 6000);
+    swapFetching = false; render(); if (notes.length) toast(notes.join("\n"), 6000);
   }
+}
+/* アプリを開くたびに、1日1回だけ自動でスワップを最新化する（通知は出さない。失敗時だけ表示） */
+function autoFetchOncePerDay(){
+  if (swapMarginMode !== "auto") return;
+  const key = "swapAutoFetchDate";
+  if (localStorage.getItem(key) === today()) return;
+  localStorage.setItem(key, today());
+  fetchSwapAuto(true);
 }
 async function save(col, id, data){
   const row = toRow(data); row.user_id = session.user.id;
@@ -721,12 +743,58 @@ function viewSettings(){
   if (settingsView === "basic") return viewSettingsBasic();
   if (settingsView === "cash") return viewSettingsCash();
   if (settingsView === "swapmargin") return viewSettingsSwapMargin();
+  if (settingsView === "swaptrend") return viewSettingsSwapTrend();
   return `<section><h2>設定</h2>
     <div class="setgrid">
       <button class="setbtn" data-panel="basic"><span class="t">基本情報</span><span class="d">取引単位・最小Lot数・建玉上限</span></button>
       <button class="setbtn" data-panel="cash"><span class="t">入出金</span><span class="d">入金・出金・キャッシュバックの記録</span></button>
       <button class="setbtn" data-panel="swapmargin"><span class="t">スワップ/証拠金</span><span class="d">通貨ペアごとのスワップと必要証拠金</span></button>
+      <button class="setbtn" data-panel="swaptrend"><span class="t">スワップ推移</span><span class="d">通貨ペアごとの週次スワップの推移（会社別）</span></button>
     </div></section>`;
+}
+const BROKER_COLORS = {"外為どっとコム":"var(--violet)","GMOクリック証券":"var(--gold)","みんなのFX":"var(--bar)","トライオートFX":"var(--buy)","セントラル短資":"var(--sell)"};
+let swapTrendPair = null;
+function viewSettingsSwapTrend(){
+  const pairs = [...new Set(state.swapHistory.map(h => h.pair))].sort();
+  let html = `<div class="subhead"><button class="linkbtn" data-back>← 設定</button></div>
+    <h2 style="margin:8px 0 4px">スワップ推移</h2>
+    <p class="hint">自動取得のたびに、その週（日曜始まり）の最新値で記録します。</p>`;
+  if (!pairs.length) return html + `<div class="empty">まだ記録がありません。自動取得を行うと、ここに表示されます。</div>`;
+  if (!swapTrendPair || !pairs.includes(swapTrendPair)) swapTrendPair = pairs[0];
+  html += `<label class="f"><span>通貨ペア</span><select id="swapTrendSel">${pairs.map(p => `<option ${p===swapTrendPair?"selected":""}>${esc(p)}</option>`).join("")}</select></label>`;
+  return html + swapTrendChart(swapTrendPair);
+}
+function swapTrendChart(pair){
+  const rows = state.swapHistory.filter(h => h.pair === pair);
+  const brokers = [...new Set(rows.map(r => r.broker))];
+  const dates = [...new Set(rows.map(r => r.date))].sort();
+  if (dates.length < 2) return `<p class="hint">2週分以上たまるとグラフが表示されます（現在${dates.length}週分）。</p>`;
+  const W = window.innerWidth < 600 ? 360 : 640, H = 200, L = 54, Rt = 14, T = 14, B = 28, iw = W-L-Rt, ih = H-T-B;
+  const vals = rows.map(r => num(r.swapPoint));
+  const sc = niceScale(Math.min(0, ...vals), Math.max(...vals), 5);
+  const ticks = Math.round((sc.max - sc.min) / sc.step);
+  const xs = i => L + (dates.length > 1 ? i/(dates.length-1)*iw : iw/2);
+  const ys = v => T + ih - (v-sc.min)/(sc.max-sc.min)*ih;
+  const fnum = n => Math.round(n).toLocaleString("ja-JP");
+  let s = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(pair)}のスワップ推移">`;
+  for (let g = 0; g <= ticks; g++){
+    const v = sc.min + sc.step*g, y = ys(v);
+    s += `<line x1="${L}" x2="${W-Rt}" y1="${y}" y2="${y}" stroke="var(--line)" stroke-width="1"/>`;
+    s += `<text x="${L-6}" y="${y+4}" text-anchor="end" font-size="9.5" fill="var(--ink-3)">${fnum(v)}</text>`;
+  }
+  const step = Math.ceil(dates.length/6);
+  dates.forEach((d,i) => { if (i%step===0 || i===dates.length-1) s += `<text x="${xs(i)}" y="${H-8}" text-anchor="middle" font-size="9.5" fill="var(--ink-3)">${fmtDate(d)}</text>`; });
+  brokers.forEach(b => {
+    const color = BROKER_COLORS[b] || "var(--ink-2)";
+    const pts = dates.map((d,i) => ({i, v: rows.find(r => r.date === d && r.broker === b)})).filter(o => o.v);
+    if (pts.length){
+      s += `<polyline points="${pts.map(o => xs(o.i).toFixed(1)+","+ys(num(o.v.swapPoint)).toFixed(1)).join(" ")}" fill="none" stroke="${color}" stroke-width="2"/>`;
+      pts.forEach(o => s += `<circle cx="${xs(o.i).toFixed(1)}" cy="${ys(num(o.v.swapPoint)).toFixed(1)}" r="2.6" fill="${color}"><title>${esc(b)} ${fmtDate(o.v.date)} ${o.v.swapPoint}</title></circle>`);
+    }
+  });
+  s += `</svg>`;
+  const legend = brokers.map(b => `<span><i style="background:${BROKER_COLORS[b]||"var(--ink-2)"}"></i>${esc(b)}</span>`).join("");
+  return `<div class="chart"><div class="legend">${legend}</div>${s}</div>`;
 }
 function viewSettingsCash(){
   return `<div class="subhead"><button class="linkbtn" data-back>← 設定</button></div>` + viewCash();
@@ -756,8 +824,8 @@ function viewSettingsSwapMargin(){
       const sw = cur && cur.swapPoint, mg = cur && cur.marginRequired;
       const ratio = sw && mg && num(sw) !== 0 ? (num(mg) / num(sw)).toLocaleString("ja-JP",{maximumFractionDigits:1}) : "—";
       html += `<tr><td style="text-align:left">${esc(pr)}</td>
-        <td><input class="fld-swap" data-broker="${esc(b)}" data-pair="${esc(pr)}" inputmode="decimal" placeholder="15" value="${sw != null ? sw : ''}" style="${inputStyle(38,'center')}" ${auto?"disabled":""}><button class="sidebtn ${swapSideOf(b,pr)==="sell"?"tag-sell":"tag-buy"}" data-broker="${esc(b)}" data-pair="${esc(pr)}" ${auto?"disabled":""}>${swapSideOf(b,pr)==="sell"?"売":"買"}</button></td>
-        <td><input class="fld-margin" data-broker="${esc(b)}" data-pair="${esc(pr)}" inputmode="numeric" placeholder="5000" value="${mg ? num(mg).toLocaleString('ja-JP') : ''}" style="${inputStyle(46,'center')}" ${auto?"disabled":""}></td>
+        <td><input class="fld-swap" data-broker="${esc(b)}" data-pair="${esc(pr)}" inputmode="decimal" placeholder="15" value="${sw != null ? sw : ''}" style="${inputStyle(56,'center')}" ${auto?"disabled":""}><button class="sidebtn ${swapSideOf(b,pr)==="sell"?"tag-sell":"tag-buy"}" data-broker="${esc(b)}" data-pair="${esc(pr)}" ${auto?"disabled":""}>${swapSideOf(b,pr)==="sell"?"売":"買"}</button></td>
+        <td><input class="fld-margin" data-broker="${esc(b)}" data-pair="${esc(pr)}" inputmode="numeric" placeholder="5000" value="${mg ? num(mg).toLocaleString('ja-JP') : ''}" style="${inputStyle(64,'center')}" ${auto?"disabled":""}></td>
         <td>${ratio}${ratio !== "—" ? "日" : ""}</td>
       </tr>`;
     });
@@ -790,6 +858,8 @@ function bindView(){
   const v = $("#view");
   v.querySelectorAll("[data-act]").forEach(b => b.onclick = () => ({record:()=>openWeek(), addPos:()=>openPos(), addClosed:()=>openClosed(), addCash:()=>openCash(), toggleWeeks:()=>{weeksExpanded = !weeksExpanded; render();}, swapBreakdown:()=>openSwapBreakdown(), addMilestone:()=>openMilestone(), fetchSwap:()=>fetchSwapAuto()})[b.dataset.act]());
   v.querySelectorAll(".mode-seg button").forEach(b => b.onclick = () => { swapMarginMode = b.dataset.v; render(); });
+  const stSel = v.querySelector("#swapTrendSel");
+  if (stSel) stSel.onchange = () => { swapTrendPair = stSel.value; render(); };
   v.querySelectorAll("[data-edit-week]").forEach(b => b.onclick = () => openWeek(state.weeks.find(w=>w.id===b.dataset.editWeek)));
   v.querySelectorAll("[data-edit-pos]").forEach(b => b.onclick = () => openPos(state.positions.find(w=>w.id===b.dataset.editPos)));
   v.querySelectorAll(".holdseg button").forEach(b => b.onclick = () => { holdView[b.parentNode.dataset.broker] = b.dataset.v; render(); });
