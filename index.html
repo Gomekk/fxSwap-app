@@ -225,8 +225,8 @@ const pairsFor = broker => {
   PAIRS.forEach(p => { out.push(p); if (extra.has(p)) out.push(p + "(LIGHT)"); });
   return out;
 };
-const COLS = ["weeks","positions","closed","cash","settings","goals","milestones","swapHistory"];
-const state = {weeks:[],positions:[],closed:[],cash:[],settings:[],goals:[],milestones:[],swapHistory:[]};
+const COLS = ["weeks","positions","closed","cash","settings","goals","milestones","swapHistory","monthlySwap"];
+const state = {weeks:[],positions:[],closed:[],cash:[],settings:[],goals:[],milestones:[],swapHistory:[],monthlySwap:[]};
 let ready = false, authKnown = false, session = null, tab = "trend";
 
 const $ = s => document.querySelector(s);
@@ -246,6 +246,8 @@ const weeksSorted = () => [...state.weeks].sort((a,b) => a.date < b.date ? -1 : 
 const monthly = w => w.monthly != null ? w.monthly : w.daily * 30;
 const yearly = w => w.yearly != null ? w.yearly : w.daily * 365;
 const cashPrincipal = () => state.cash.reduce((s,c) => s + (c.kind === "out" ? -1 : c.kind === "cashback" ? 0 : 1) * num(c.amount), 0);
+/* 決済済みポジションの実現損益（為替損益＋スワップ）。dateStrを渡すとその日までの累計 */
+const realizedPLAsOf = dateStr => state.closed.filter(c => !dateStr || (c.closeDate||"") <= dateStr).reduce((s,c) => s + num(c.fxPl) + num(c.swapTotal), 0);
 const settingFor = (broker, pair) => state.settings.find(x => x.broker === broker && x.pair === pair);
 const lotSize = (broker, pair) => { const s = settingFor(broker, pair); return s && num(s.lotSize) > 0 ? num(s.lotSize) : null; };
 const orderUnitFactor = (broker, pair) => minUnitLabel(broker) === "万通貨" ? 10000 : lotSize(broker, pair);
@@ -281,7 +283,7 @@ const retryFetch = async (url, opts) => {
   return res;
 };
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY, { global: { fetch: retryFetch } });
-const TABLE = {weeks:"weeks", positions:"positions", closed:"closed_positions", cash:"cash_flows", settings:"settings", goals:"goals", milestones:"goal_milestones", swapHistory:"swap_history"};
+const TABLE = {weeks:"weeks", positions:"positions", closed:"closed_positions", cash:"cash_flows", settings:"settings", goals:"goals", milestones:"goal_milestones", swapHistory:"swap_history", monthlySwap:"monthly_swap"};
 const NUMS = new Set(["equity","principal","daily","units","swap","margin","fxPl","swapTotal","amount","lots","lotSize","minLot","maxPosition","monthlyTarget","yearlyTarget","principalTarget","swapPoint","marginRequired","targetAmount","targetEquity"]);
 const toSnake = k => k.replace(/[A-Z]/g, m => "_" + m.toLowerCase());
 const toCamel = k => k.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
@@ -320,6 +322,36 @@ async function saveSettingsBatch(broker, items){
     if (cur) Object.assign(cur, patch); else state.settings.push({id:null, broker, pair: it.pair, ...patch});
   });
   return true;
+}
+/* 月間累計スワップ実績の手動入力（証券会社ごとに1件、月+証券会社で一意） */
+async function saveMonthlySwapBatch(month, rows){
+  const dbRows = rows.map(r => { const row = toRow({month, broker: r.broker, amount: r.amount}); row.user_id = session.user.id; return row; });
+  const { error } = await sb.from("monthly_swap").upsert(dbRows, { onConflict: "user_id,month,broker" });
+  if (error){ toast("保存できませんでした：" + error.message, 4000); return false; }
+  await load("monthlySwap");
+  return true;
+}
+async function removeMonthlySwapMonth(month){
+  const ids = state.monthlySwap.filter(r => r.month === month).map(r => r.id).filter(Boolean);
+  for (const id of ids) await removeDoc("monthlySwap", id);
+}
+function openMonthlySwap(month){
+  const entries = month ? state.monthlySwap.filter(r => r.month === month) : [];
+  const valFor = b => { const e = entries.find(r => r.broker === b); return e && e.amount != null ? num(e.amount).toLocaleString("ja-JP") : ""; };
+  openSheet(month ? `${month.replace("-","年")}月の実績を編集` : "月間スワップ実績を記録", `
+    ${field("対象の年月","month", month || "", "month")}
+    ${BROKERS.map(b => field(b, b, valFor(b), "text", 'inputmode="numeric"')).join("")}
+    ${actions(entries.length > 0)}`);
+  const s = $("#sheetIn");
+  BROKERS.forEach(b => bindComma(s.querySelector(`[name="${b}"]`)));
+  wire(async () => {
+    const v = formVals();
+    if (!v.month){ toast("年月を選んでください"); return; }
+    const rows = BROKERS.map(b => ({broker: b, amount: v[b] !== "" ? num(v[b]) : null})).filter(r => r.amount != null);
+    if (!rows.length){ toast("少なくとも1社は入力してください"); return; }
+    if (!(await saveMonthlySwapBatch(v.month, rows))) return;
+    closeSheet(); render(); toast("記録しました");
+  }, () => removeMonthlySwapMonth(month));
 }
 /* 自動取得：取り扱いペア（基本情報の取引単位か建玉上限が入力済み）だけを、Edge Functionから取得して保存 */
 const FETCHABLE = ["外為どっとコム", "GMOクリック証券", "みんなのFX", "トライオートFX", "セントラル短資"];
@@ -461,7 +493,7 @@ function viewTrend(){
       <div class="empty">まだ記録がありません。<br><button class="btn" data-act="record">最初の記録をつける</button></div>`;
     return html;
   }
-  const profit = last.equity - last.principal;
+  const profit = last.equity - last.principal + realizedPLAsOf(last.date);
   const dEq = prev ? last.equity - prev.equity : null;
   const dSw = prev ? last.daily - prev.daily : null;
   const yieldPct = last.equity > 0 ? yearly(last) / last.equity * 100 : 0;
@@ -471,7 +503,7 @@ function viewTrend(){
     <p class="rate">${dSw != null ? `前週比 <b class="${cls(dSw)}">${signed(dSw)}</b>　` : ""}評価額に対する年間スワップ <b>${yieldPct.toFixed(0)}%</b></p>
     <dl>
       <div><dt>有効評価額</dt><dd>${yen(last.equity)}${dEq != null ? `<span class="d ${cls(dEq)}">前週比 ${signed(dEq)}</span>` : ""}</dd></div>
-      <div><dt>利益（評価−元金）</dt><dd class="${cls(profit)}">${signed(profit)}<span class="d" style="color:var(--ink-3)">元金 ${yen(last.principal)}</span></dd></div>
+      <div><dt>利益（評価−元金＋実現損益）</dt><dd class="${cls(profit)}">${signed(profit)}<span class="d" style="color:var(--ink-3)">元金 ${yen(last.principal)}</span></dd></div>
       <div><dt>月間スワップ</dt><dd>${yen(monthly(last))}</dd></div>
       <div><dt>年間スワップ</dt><dd>${yen(yearly(last))}</dd></div>
     </dl></div>
@@ -485,12 +517,12 @@ function viewTrend(){
   const limit = weeksExpanded ? ws.length : Math.min(5, ws.length);
   const maxDaily = Math.max(...ws.map(w => w.daily));
   const maxEquity = Math.max(...ws.map(w => w.equity));
-  const maxProfit = Math.max(...ws.map(w => w.equity - w.principal));
+  const maxProfit = Math.max(...ws.map(w => w.equity - w.principal + realizedPLAsOf(w.date)));
   const allDiffs = ws.map((w,i) => i > 0 ? w.equity - ws[i-1].equity : null).filter(x => x != null);
   const maxDiff = allDiffs.length ? Math.max(...allDiffs) : null;
   const ribbon = ok => ok ? `<span class="hi-badge" title="過去最高">🎗️</span>` : "";
   for (let i = ws.length-1, n = 0; i >= 0 && n < limit; i--, n++){
-    const w = ws[i], p = ws[i-1], d = p ? w.equity - p.equity : null, pr = w.equity - w.principal;
+    const w = ws[i], p = ws[i-1], d = p ? w.equity - p.equity : null, pr = w.equity - w.principal + realizedPLAsOf(w.date);
     html += `<li><button class="row wk" data-edit-week="${esc(w.id)}">
       <span class="date">${fmtDate(w.date)}</span>
       <span class="mid"><span class="hi-anchor">1${ribbon(w.daily === maxDaily)}</span>日 ${yen(w.daily)}</span>
@@ -499,7 +531,7 @@ function viewTrend(){
     </button></li>`;
   }
   html += `</ul>${ws.length > 5 ? `<div style="text-align:center;margin-top:8px"><button class="linkbtn" data-act="toggleWeeks">${weeksExpanded ? "閉じる" : "全表示"}</button></div>` : ""}</section>`;
-  html += `<section><h2>月間累計スワップ実績</h2>${monthlySwapChart()}</section>`;
+  html += `<section><h2>月間累計スワップ実績<span class="act"><button class="linkbtn" data-act="addMonthlySwap">＋ 記録</button></span></h2>${monthlySwapChart()}</section>`;
   return html;
 }
 
@@ -584,13 +616,18 @@ function monthlySwapSummary(){
     byMonth[mo] ||= {};
     for (const [b, v] of Object.entries(w.brokerSwap)) byMonth[mo][b] = (byMonth[mo][b] || 0) + num(v) * 7;
   });
+  /* 手動で記録した月は、その月ぶんを自動見積もりより優先して丸ごと差し替える */
+  const manualMonths = new Set(state.monthlySwap.map(r => r.month));
+  manualMonths.forEach(mo => { byMonth[mo] = {}; });
+  state.monthlySwap.forEach(r => { byMonth[r.month] ||= {}; byMonth[r.month][r.broker] = num(r.amount); });
   return byMonth;
 }
 function monthlySwapChart(){
   const byMonth = monthlySwapSummary();
   const months = Object.keys(byMonth).sort();
+  const manualMonths = new Set(state.monthlySwap.map(r => r.month));
   const brokersSeen = BROKERS.filter(b => months.some(mo => byMonth[mo][b] > 0));
-  if (!months.length || !brokersSeen.length) return `<p class="hint">週ごとの記録がたまると、月ごとのスワップ実績が表示されます。</p>`;
+  if (!months.length || !brokersSeen.length) return `<p class="hint">週ごとの記録がたまるか、下の「＋ 記録」から手動で入力すると、月ごとのスワップ実績が表示されます。</p>`;
   const totals = months.map(mo => brokersSeen.reduce((s,b) => s + (byMonth[mo][b] || 0), 0));
   const W = window.innerWidth < 600 ? 340 : 640, H = 220, L = 58, Rt = 14, T = 14, B = 26, iw = W-L-Rt, ih = H-T-B;
   const sc = niceScale(0, Math.max(...totals, 0), 5);
@@ -621,7 +658,7 @@ function monthlySwapChart(){
   let html = `<div class="chart"><div class="legend">${legend}</div>${s}</div>
     <div class="tablebox" style="margin-top:10px"><table class="sum tight" style="width:100%"><thead><tr><th style="text-align:left">月</th><th>計</th>${brokersSeen.map(b => `<th>${esc(BROKER_SHORT[b]||b)}</th>`).join("")}</tr></thead><tbody>`;
   months.forEach((mo,i) => {
-    html += `<tr><td style="text-align:left">${mo.replace("-",".")}</td><td>${yen(totals[i])}</td>${brokersSeen.map(b => `<td>${yen(byMonth[mo][b]||0)}</td>`).join("")}</tr>`;
+    html += `<tr data-edit-monthlyswap="${mo}" style="cursor:pointer"><td style="text-align:left">${mo.replace("-",".")}${manualMonths.has(mo) ? ` <span style="font-size:9px;color:var(--ink-3)">手動</span>` : ""}</td><td>${yen(totals[i])}</td>${brokersSeen.map(b => `<td>${yen(byMonth[mo][b]||0)}</td>`).join("")}</tr>`;
   });
   return html + `</tbody></table></div>`;
 }
@@ -787,7 +824,37 @@ function nearestMilestone(){
   const sorted = [...state.milestones].sort((a,b) => (a.targetDate||"").localeCompare(b.targetDate||""));
   return sorted.find(m => (m.targetDate||"") >= todayYM) || sorted[sorted.length-1];
 }
+/* 対象月の月末時点でのいちばん新しい週次記録（無ければ直近の記録）を、その月時点の実績とみなす */
+function actualsAtMonth(ym){
+  const [y, m] = ym.split("-").map(Number);
+  const nextYM = (m === 12 ? `${y+1}-01` : `${y}-${String(m+1).padStart(2,"0")}`) + "-01";
+  const ws = weeksSorted();
+  const upTo = ws.filter(w => (w.date||"") < nextYM);
+  const w = upTo.length ? upTo[upTo.length-1] : ws[ws.length-1];
+  return {equity: w ? w.equity : 0, daily: w ? w.daily : 0};
+}
+function milestoneStatus(m, actual){
+  const checks = [];
+  if (num(m.targetEquity)) checks.push(actual.equity >= num(m.targetEquity));
+  if (num(m.targetAmount)) checks.push(actual.daily >= num(m.targetAmount));
+  if (!checks.length) return null;
+  if (checks.every(x => x)) return "完全達成";
+  if (checks.some(x => x)) return "一部達成";
+  return "未達成";
+}
+const STATUS_COLOR = {"完全達成":"var(--gain)", "一部達成":"var(--gold)", "未達成":"var(--ink-3)"};
+function milestoneCard(m, actual){
+  const [y, mo] = (m.targetDate||"").split("-");
+  const status = milestoneStatus(m, actual);
+  return `<button class="goalrow" data-edit-milestone="${esc(m.id)}" style="all:unset;display:block;width:100%;cursor:pointer;box-sizing:border-box;margin-bottom:14px;padding:14px 16px;border:1px solid var(--line);border-radius:8px;background:var(--card);position:relative">
+    ${status ? `<span style="position:absolute;top:10px;right:12px;font-size:11px;font-weight:700;padding:2px 9px;border-radius:10px;background:${STATUS_COLOR[status]};color:var(--paper);white-space:nowrap">${status}</span>` : ""}
+    <div class="goalhead"><span>${y}年${mo?Number(mo):""}月</span></div>
+    <div class="goalstat">有効評価額 ${m.targetEquity ? yen(num(m.targetEquity)) : "—"}　1日あたりスワップ ${m.targetAmount ? yen(num(m.targetAmount)) : "—"}</div>
+  </button>`;
+}
+let goalsView = null;
 function viewGoals(){
+  if (goalsView === "past") return viewPastMilestones();
   const last = weeksSorted().slice(-1)[0];
   const dailyNow = state.positions.reduce((s2,p) => s2 + posDailySwap(p), 0);
   const equityNow = last ? last.equity : 0;
@@ -815,19 +882,27 @@ function viewGoals(){
   }
   html += `</section>`;
   html += `<section><h2>目標一覧（複数時点）<span class="act"><button class="linkbtn" data-act="addMilestone">＋ 追加</button></span></h2>`;
-  const ms = [...state.milestones].sort((a,b) => (a.targetDate||"").localeCompare(b.targetDate||""));
-  if (!ms.length){
+  const todayYM = today().slice(0,7);
+  const all = [...state.milestones].sort((a,b) => (a.targetDate||"").localeCompare(b.targetDate||""));
+  const currentMs = all.filter(m => (m.targetDate||"") >= todayYM);
+  const pastCount = all.length - currentMs.length;
+  if (!currentMs.length){
     html += `<div class="empty">「〇年〇月までに有効評価額〇円・1日あたりスワップ〇円」という目標を複数登録できます。<br><button class="btn" data-act="addMilestone">目標を追加</button></div>`;
   } else {
-    ms.forEach(m => {
-      const [y, mo] = (m.targetDate||"").split("-");
-      html += `<button class="goalrow" data-edit-milestone="${esc(m.id)}" style="all:unset;display:block;width:100%;cursor:pointer;box-sizing:border-box;margin-bottom:14px;padding:14px 16px;border:1px solid var(--line);border-radius:8px;background:var(--card)">
-        <div class="goalhead"><span>${y}年${mo?Number(mo):""}月</span></div>
-        <div class="goalstat">有効評価額 ${m.targetEquity ? yen(num(m.targetEquity)) : "—"}　1日あたりスワップ ${m.targetAmount ? yen(num(m.targetAmount)) : "—"}</div>
-      </button>`;
-    });
+    currentMs.forEach(m => { html += milestoneCard(m, {equity: equityNow, daily: dailyNow}); });
   }
-  return html + `</section>`;
+  html += `</section>`;
+  if (pastCount > 0) html += `<section><button class="linkbtn" data-act="viewPastGoals">過去の目標一覧（${pastCount}件）→</button></section>`;
+  return html;
+}
+function viewPastMilestones(){
+  const todayYM = today().slice(0,7);
+  const past = [...state.milestones].filter(m => (m.targetDate||"") < todayYM).sort((a,b) => (b.targetDate||"").localeCompare(a.targetDate||""));
+  let html = `<div class="subhead"><button class="linkbtn" data-act="viewCurrentGoals">← 目標・実績</button></div>
+    <h2 style="margin:8px 0 4px">過去の目標一覧</h2>`;
+  if (!past.length) return html + `<div class="empty">まだありません。</div>`;
+  past.forEach(m => { html += milestoneCard(m, actualsAtMonth(m.targetDate)); });
+  return html;
 }
 
 function openMilestone(m){
@@ -989,7 +1064,8 @@ function viewSettingsBasic(){
 
 function bindView(){
   const v = $("#view");
-  v.querySelectorAll("[data-act]").forEach(b => b.onclick = () => ({record:()=>openWeek(), addPos:()=>openPos(), addClosed:()=>openClosed(), addCash:()=>openCash(), toggleWeeks:()=>{weeksExpanded = !weeksExpanded; render();}, swapBreakdown:()=>openSwapBreakdown(), addMilestone:()=>openMilestone(), fetchSwap:()=>fetchSwapAuto()})[b.dataset.act]());
+  v.querySelectorAll("[data-act]").forEach(b => b.onclick = () => ({record:()=>openWeek(), addPos:()=>openPos(), addClosed:()=>openClosed(), addCash:()=>openCash(), toggleWeeks:()=>{weeksExpanded = !weeksExpanded; render();}, swapBreakdown:()=>openSwapBreakdown(), addMilestone:()=>openMilestone(), fetchSwap:()=>fetchSwapAuto(), viewPastGoals:()=>{goalsView = "past"; render();}, viewCurrentGoals:()=>{goalsView = null; render();}, addMonthlySwap:()=>openMonthlySwap(null)})[b.dataset.act]());
+  v.querySelectorAll("[data-edit-monthlyswap]").forEach(tr => tr.onclick = () => openMonthlySwap(tr.dataset.editMonthlyswap));
   v.querySelectorAll(".mode-seg button").forEach(b => b.onclick = () => { swapMarginMode = b.dataset.v; render(); });
   const stSel = v.querySelector("#swapTrendSel");
   if (stSel) stSel.onchange = () => { swapTrendPair = stSel.value; render(); };
@@ -1107,7 +1183,8 @@ function openWeek(w){
   const sumUp = () => { const vals = Object.values(brokers).filter(v => v !== ""); if (vals.length) s.querySelector('[name="equity"]').value = vals.reduce((a,v)=>a+num(v),0).toLocaleString("ja-JP"); calc(); };
   const calc = () => {
     const v = formVals(), eq = num(v.equity), pr = num(v.principal), d = num(v.daily);
-    s.querySelector("#wcalc").innerHTML = `<span>利益（評価−元金）</span><b class="${eq ? cls(eq-pr) : ""}">${eq ? signed(eq-pr) : "—"}</b><span>月間 / 年間スワップ</span><span>${yen(d*30)} / ${yen(d*365)}</span>`;
+    const rpl = realizedPLAsOf(v.date);
+    s.querySelector("#wcalc").innerHTML = `<span>利益（評価−元金＋実現損益）</span><b class="${eq ? cls(eq-pr+rpl) : ""}">${eq ? signed(eq-pr+rpl) : "—"}</b><span>月間 / 年間スワップ</span><span>${yen(d*30)} / ${yen(d*365)}</span>`;
   };
   s.querySelector("#bAdd").onclick = () => { brokers = readBrokers(); const n = BROKERS.find(b => !(b in brokers)) || "業者" + (Object.keys(brokers).length+1); brokers[n] = ""; redraw(); };
   s.oninput = calc; bindRows(); calc();
