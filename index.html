@@ -113,6 +113,9 @@ section h2 .act{font-family:var(--sans);font-size:13px;font-weight:500}
 .pos .mr{font-size:12px;color:var(--ink-2);text-align:right}
 .broker{margin:18px 0 8px;font-size:13px;font-weight:700;color:var(--ink-2);display:flex;justify-content:space-between;padding-bottom:6px;border-bottom:1px solid var(--line)}
 .holdseg{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden;margin:0 0 10px}
+.brokerBlock{position:relative}
+.brokerBlock.dragging{opacity:.5;background:var(--paper-2)}
+.drag-handle{display:inline-block;cursor:grab;padding:2px 10px 2px 0;color:var(--ink-3);touch-action:none;user-select:none;font-size:15px;vertical-align:middle}
 .holdseg button{border:0;background:var(--card);padding:6px 14px;font-size:12.5px;color:var(--ink-2)}
 .holdseg button[aria-pressed="true"]{background:var(--ink);color:var(--paper);font-weight:700}
 .tag{display:inline-block;font-size:11px;padding:0 6px;border:1px solid currentColor;border-radius:3px;margin-left:6px;font-weight:500;vertical-align:1px}
@@ -141,6 +144,8 @@ table.sum th,table.sum td{padding:8px 10px;text-align:right;white-space:nowrap;b
 table.sum.tight th,table.sum.tight td{padding:6px 2px;font-size:12px}
 table.sum.tight th:first-child,table.sum.tight td:first-child{font-size:12.5px;padding-left:10px;padding-right:1px}
 table.sum.tight input:disabled{opacity:.5;background:var(--paper-2)}
+tr.tr-unhandled{opacity:.4}
+tr.tr-unhandled input{background:var(--paper-2)}
 .sidebtn{background:none;border:1px solid currentColor;border-radius:3px;font-size:11px;padding:2px 4px;margin-left:3px;cursor:pointer;vertical-align:middle}
 .sidebtn:disabled{opacity:.5;cursor:default}
 table.sum th{font-weight:500;color:var(--ink-3);font-size:12px}
@@ -475,16 +480,23 @@ function viewTrend(){
   html += `<section><h2>推移</h2>${chart(ws)}</section>`;
   html += `<section><h2>週ごとの記録<span class="act"><button class="linkbtn" data-act="record">＋ 記録</button></span></h2><ul class="rows">`;
   const limit = weeksExpanded ? ws.length : Math.min(5, ws.length);
+  const maxDaily = Math.max(...ws.map(w => w.daily));
+  const maxEquity = Math.max(...ws.map(w => w.equity));
+  const maxProfit = Math.max(...ws.map(w => w.equity - w.principal));
+  const allDiffs = ws.map((w,i) => i > 0 ? w.equity - ws[i-1].equity : null).filter(x => x != null);
+  const maxDiff = allDiffs.length ? Math.max(...allDiffs) : null;
+  const ribbon = ok => ok ? ` <span style="font-size:10px" title="過去最高">🎗️</span>` : "";
   for (let i = ws.length-1, n = 0; i >= 0 && n < limit; i--, n++){
     const w = ws[i], p = ws[i-1], d = p ? w.equity - p.equity : null, pr = w.equity - w.principal;
     html += `<li><button class="row wk" data-edit-week="${esc(w.id)}">
       <span class="date">${fmtDate(w.date)}</span>
-      <span class="mid">1日 ${yen(w.daily)}</span>
-      <span class="eq">${yen(w.equity)}</span>
-      <span class="sub">利益 <span class="${cls(pr)}">${signed(pr)}</span>${d != null ? `　前週比 <span class="${cls(d)}">${signed(d)}</span>` : ""}</span>
+      <span class="mid">1日 ${yen(w.daily)}${ribbon(w.daily === maxDaily)}</span>
+      <span class="eq">${yen(w.equity)}${ribbon(w.equity === maxEquity)}</span>
+      <span class="sub">利益 <span class="${cls(pr)}">${signed(pr)}</span>${ribbon(pr === maxProfit)}${d != null ? `　前週比 <span class="${cls(d)}">${signed(d)}</span>${ribbon(maxDiff != null && d === maxDiff)}` : ""}</span>
     </button></li>`;
   }
   html += `</ul>${ws.length > 5 ? `<div style="text-align:center;margin-top:8px"><button class="linkbtn" data-act="toggleWeeks">${weeksExpanded ? "閉じる" : "全表示"}</button></div>` : ""}</section>`;
+  html += `<section><h2>月間累計スワップ実績</h2>${monthlySwapChart()}</section>`;
   return html;
 }
 
@@ -559,6 +571,58 @@ function chart(ws){
   return `<div class="chart"><div class="legend"><span><i style="background:var(--violet);height:3px;vertical-align:3px"></i>1日あたりスワップ（左）</span><span><i style="background:var(--gold)"></i>元金</span><span><i style="background:var(--gain)"></i>利益（右）</span></div>${s}</div>`;
 }
 
+/* 週次記録に保存された、その時点の証券会社ごとの1日あたりスワップ（brokerSwap）から、月間累計を見積もる（1週あたり×7日で計算） */
+function monthlySwapSummary(){
+  const byMonth = {};
+  weeksSorted().forEach(w => {
+    if (!w.brokerSwap) return;
+    const mo = (w.date || "").slice(0,7);
+    if (!mo) return;
+    byMonth[mo] ||= {};
+    for (const [b, v] of Object.entries(w.brokerSwap)) byMonth[mo][b] = (byMonth[mo][b] || 0) + num(v) * 7;
+  });
+  return byMonth;
+}
+function monthlySwapChart(){
+  const byMonth = monthlySwapSummary();
+  const months = Object.keys(byMonth).sort();
+  const brokersSeen = BROKERS.filter(b => months.some(mo => byMonth[mo][b] > 0));
+  if (!months.length || !brokersSeen.length) return `<p class="hint">週ごとの記録がたまると、月ごとのスワップ実績が表示されます。</p>`;
+  const totals = months.map(mo => brokersSeen.reduce((s,b) => s + (byMonth[mo][b] || 0), 0));
+  const W = window.innerWidth < 600 ? 340 : 640, H = 220, L = 58, Rt = 14, T = 14, B = 26, iw = W-L-Rt, ih = H-T-B;
+  const sc = niceScale(0, Math.max(...totals, 0), 5);
+  const ticks = Math.round((sc.max - sc.min) / sc.step);
+  const bw = iw / months.length;
+  const xs = i => L + bw*i + bw/2;
+  const ys = v => T + ih - (v-sc.min)/(sc.max-sc.min)*ih;
+  const fnum = n => Math.round(n).toLocaleString("ja-JP");
+  let s = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="月ごとの累計スワップ実績（証券会社別）">`;
+  for (let g = 0; g <= ticks; g++){
+    const v = sc.min + sc.step*g, y = ys(v);
+    s += `<line x1="${L}" x2="${W-Rt}" y1="${y}" y2="${y}" stroke="var(--line)" stroke-width="1"/>`;
+    s += `<text x="${L-6}" y="${y+4}" text-anchor="end" font-size="9.5" fill="var(--ink-3)">¥${fnum(v)}</text>`;
+  }
+  months.forEach((mo,i) => {
+    let base = sc.min;
+    brokersSeen.forEach(b => {
+      const val = byMonth[mo][b] || 0;
+      if (!val) return;
+      const y0 = ys(base), y1 = ys(base + val);
+      s += `<rect x="${(xs(i)-bw*0.35).toFixed(1)}" y="${y1.toFixed(1)}" width="${(bw*0.7).toFixed(1)}" height="${(y0-y1).toFixed(1)}" fill="${BROKER_COLORS[b]||"var(--ink-2)"}" rx="1"><title>${esc(b)} ${mo} ${yen(val)}</title></rect>`;
+      base += val;
+    });
+  });
+  months.forEach((mo,i) => s += `<text x="${xs(i)}" y="${H-8}" text-anchor="middle" font-size="9.5" fill="var(--ink-3)">${mo.replace("-",".")}</text>`);
+  s += `</svg>`;
+  const legend = brokersSeen.map(b => `<span><i style="background:${BROKER_COLORS[b]||"var(--ink-2)"}"></i>${esc(BROKER_SHORT[b]||b)}</span>`).join("");
+  let html = `<div class="chart"><div class="legend">${legend}</div>${s}</div>
+    <div class="tablebox" style="margin-top:10px"><table class="sum tight" style="width:100%"><thead><tr><th style="text-align:left">月</th><th>計</th>${brokersSeen.map(b => `<th>${esc(BROKER_SHORT[b]||b)}</th>`).join("")}</tr></thead><tbody>`;
+  months.forEach((mo,i) => {
+    html += `<tr><td style="text-align:left">${mo.replace("-",".")}</td><td>${yen(totals[i])}</td>${brokersSeen.map(b => `<td>${yen(byMonth[mo][b]||0)}</td>`).join("")}</tr>`;
+  });
+  return html + `</tbody></table></div>`;
+}
+
 function openSwapBreakdown(){
   const g = {};
   state.positions.forEach(p => { g[p.pair] ||= 0; g[p.pair] += posDailySwap(p); });
@@ -576,6 +640,68 @@ function openSwapBreakdown(){
 }
 
 let holdView = {}; // 証券会社ごとの表示（"summary" | "list"）。既定はサマリー
+let brokerOrder = null;
+function getBrokerOrder(){
+  if (brokerOrder) return brokerOrder;
+  try { brokerOrder = JSON.parse(localStorage.getItem("brokerOrder") || "null") || []; } catch (e) { brokerOrder = []; }
+  return brokerOrder;
+}
+function orderBrokers(names){
+  const order = getBrokerOrder();
+  return [...names].sort((a, c) => {
+    const ia = order.indexOf(a), ic = order.indexOf(c);
+    if (ia === -1 && ic === -1) return BROKERS.indexOf(a) - BROKERS.indexOf(c);
+    if (ia === -1) return 1;
+    if (ic === -1) return -1;
+    return ia - ic;
+  });
+}
+/* 三本線を長押し(350ms)すると、証券会社の段をドラッグで並び替えられる */
+function bindBrokerDrag(root){
+  root.querySelectorAll(".drag-handle").forEach(handle => {
+    handle.onpointerdown = e => {
+      const block = handle.closest(".brokerBlock");
+      if (!block) return;
+      const startX = e.clientX, startY = e.clientY;
+      let dragging = false;
+      const timer = setTimeout(() => { dragging = true; block.classList.add("dragging"); }, 350);
+      const onMove = ev => {
+        if (!dragging){
+          if (Math.abs(ev.clientX - startX) > 10 || Math.abs(ev.clientY - startY) > 10) finish();
+          return;
+        }
+        ev.preventDefault();
+        const y = ev.clientY;
+        for (const other of block.parentNode.querySelectorAll(".brokerBlock")){
+          if (other === block) continue;
+          const r = other.getBoundingClientRect(), mid = r.top + r.height / 2;
+          const blockIsAfter = !!(other.compareDocumentPosition(block) & Node.DOCUMENT_POSITION_FOLLOWING);
+          if (y < mid && blockIsAfter){ other.parentNode.insertBefore(block, other); break; }
+          if (y > mid && !blockIsAfter){ other.parentNode.insertBefore(block, other.nextSibling); break; }
+        }
+      };
+      const onUp = () => {
+        clearTimeout(timer);
+        if (dragging){
+          block.classList.remove("dragging");
+          const order = [...block.parentNode.querySelectorAll(".brokerBlock")].map(el => el.dataset.broker);
+          brokerOrder = order;
+          localStorage.setItem("brokerOrder", JSON.stringify(order));
+        }
+        finish();
+      };
+      const finish = () => {
+        clearTimeout(timer);
+        document.removeEventListener("pointermove", onMove);
+        document.removeEventListener("pointerup", onUp);
+        document.removeEventListener("pointercancel", onUp);
+      };
+      document.addEventListener("pointermove", onMove);
+      document.addEventListener("pointerup", onUp);
+      document.addEventListener("pointercancel", onUp);
+    };
+  });
+}
 function viewHold(){
   const ps = state.positions;
   let html = `<section><h2>保有ポジション<span class="act"><button class="linkbtn" data-act="addPos">＋ 追加</button></span></h2>`;
@@ -583,7 +709,8 @@ function viewHold(){
   const lastWeek = weeksSorted().slice(-1)[0];
   const gAll = {};
   ps.forEach(p => { gAll[p.pair] ||= {units:0, lots:0, buy:0, sell:0, swap:0}; gAll[p.pair].units += num(p.units); gAll[p.pair].lots += num(p.lots); gAll[p.pair][p.side === "sell" ? "sell" : "buy"]++; gAll[p.pair].swap += posDailySwap(p); });
-  html += `<div class="broker"><span>全証券会社合計</span></div>
+  const totalDaily = ps.reduce((s, p) => s + posDailySwap(p), 0);
+  html += `<div class="broker"><span>全証券会社合計</span><span>1日 ${signed(totalDaily)}</span></div>
     <div class="tablebox"><table class="sum" style="width:100%"><thead><tr><th style="text-align:left">通貨ペア</th><th>数量</th><th>スワップ</th><th>内訳</th></tr></thead><tbody>`;
   Object.entries(gAll).sort((a,c) => a[0].localeCompare(c[0])).forEach(([pair, agg]) => {
     html += `<tr><td style="text-align:left">${esc(pair)}</td><td>${num(agg.units).toLocaleString("ja-JP")}通貨(${agg.lots}lot)</td><td class="${cls(agg.swap)}">${signed(agg.swap)}</td><td>${agg.buy ? `<span class="tag tag-buy">買${agg.buy}</span>` : ""}${agg.sell ? `<span class="tag tag-sell">売${agg.sell}</span>` : ""}</td></tr>`;
@@ -591,11 +718,13 @@ function viewHold(){
   html += `</tbody></table></div>`;
   const byB = {};
   ps.forEach(p => (byB[p.broker||"未設定"] ||= []).push(p));
-  for (const [b, list] of Object.entries(byB)){
+  for (const b of orderBrokers(Object.keys(byB))){
+    const list = byB[b];
     const view = holdView[b] || "summary";
     const brokerDaily = list.reduce((s,p) => s + posDailySwap(p), 0);
     const brokerEquity = lastWeek && lastWeek.brokers && lastWeek.brokers[b] != null ? num(lastWeek.brokers[b]) : null;
-    html += `<div class="broker"><span>${esc(b)}</span><span>${brokerEquity != null ? yen(brokerEquity) : "—"}</span><span>1日 ${signed(brokerDaily)}</span></div>
+    html += `<div class="brokerBlock" data-broker="${esc(b)}">
+      <div class="broker"><span><span class="drag-handle" data-broker="${esc(b)}" aria-label="並び替え">☰</span>${esc(b)}</span><span>${brokerEquity != null ? yen(brokerEquity) : "—"}</span><span>1日 ${signed(brokerDaily)}</span></div>
       <div class="holdseg" data-broker="${esc(b)}"><button data-v="summary" aria-pressed="${view==="summary"}">サマリー</button><button data-v="list" aria-pressed="${view==="list"}">一覧</button></div>${view === "list" ? `<span style="font-size:12px;color:var(--ink-2);margin-left:8px">${list.length}件</span>` : ""}`;
     if (view === "summary"){
       const g = {};
@@ -618,6 +747,7 @@ function viewHold(){
       });
       html += `</ul>`;
     }
+    html += `</div>`;
   }
   return html + `</section>`;
 }
@@ -706,9 +836,9 @@ function openMilestone(m){
     ${actions(!!m)}`);
   const s = $("#sheetIn");
   const eqI = s.querySelector('[name="targetEquity"]'), dI = s.querySelector('[name="targetAmount"]');
-  eqI.oninput = () => { eqI.value = eqI.value.replace(/[^\d]/g,""); };
+  eqI.oninput = () => { const d = eqI.value.replace(/[^\d]/g,""); eqI.value = d ? Number(d).toLocaleString("ja-JP") : ""; };
   const recalcM = () => { const d = num(dI.value); s.querySelector("#mCalc").innerHTML = `<span>月間スワップ（自動）</span><b>${yen(d*30)}</b><span>年間スワップ（自動）</span><b>${yen(d*365)}</b>`; };
-  dI.oninput = () => { dI.value = dI.value.replace(/[^\d]/g,""); recalcM(); };
+  dI.oninput = () => { const d = dI.value.replace(/[^\d]/g,""); dI.value = d ? Number(d).toLocaleString("ja-JP") : ""; recalcM(); };
   recalcM();
   wire(async () => {
     const v = formVals();
@@ -752,6 +882,7 @@ function viewSettings(){
     </div></section>`;
 }
 const BROKER_COLORS = {"外為どっとコム":"var(--violet)","GMOクリック証券":"var(--gold)","みんなのFX":"var(--bar)","トライオートFX":"var(--buy)","セントラル短資":"var(--sell)"};
+const BROKER_SHORT = {"外為どっとコム":"外為","GMOクリック証券":"GMO","みんなのFX":"みんF","トライオートFX":"トライ","セントラル短資":"セン短"};
 let swapTrendPair = null;
 function viewSettingsSwapTrend(){
   const pairs = [...new Set(state.swapHistory.map(h => h.pair))].sort();
@@ -822,7 +953,7 @@ function viewSettingsSwapMargin(){
       const cur = settingFor(b, pr);
       const sw = cur && cur.swapPoint, mg = cur && cur.marginRequired;
       const ratio = sw && mg && num(sw) !== 0 ? (num(mg) / num(sw)).toLocaleString("ja-JP",{maximumFractionDigits:1}) : "—";
-      html += `<tr><td style="text-align:left">${esc(pr)}</td>
+      html += `<tr class="${isHandled(b, pr) ? "" : "tr-unhandled"}"><td style="text-align:left">${esc(pr)}</td>
         <td style="text-align:center"><span style="display:inline-flex;align-items:center;gap:3px"><input class="fld-swap" data-broker="${esc(b)}" data-pair="${esc(pr)}" inputmode="decimal" placeholder="15" value="${sw != null ? sw : ''}" style="${inputStyle(56,'center')}" ${auto?"disabled":""}><button class="sidebtn ${swapSideOf(b,pr)==="sell"?"tag-sell":"tag-buy"}" data-broker="${esc(b)}" data-pair="${esc(pr)}" ${auto?"disabled":""}>${swapSideOf(b,pr)==="sell"?"売":"買"}</button></span></td>
         <td style="text-align:center"><input class="fld-margin" data-broker="${esc(b)}" data-pair="${esc(pr)}" inputmode="numeric" placeholder="5000" value="${mg ? num(mg).toLocaleString('ja-JP') : ''}" style="${inputStyle(64,'center')}" ${auto?"disabled":""}></td>
         <td>${ratio}${ratio !== "—" ? "日" : ""}</td>
@@ -843,7 +974,7 @@ function viewSettingsBasic(){
       <div class="tablebox"><table class="sum" style="width:100%"><thead><tr><th style="text-align:left">通貨ペア</th><th>取引単位(1lot=)</th><th>建玉上限</th></tr></thead><tbody>`;
     pairsFor(b).forEach(pr => {
       const cur = settingFor(b, pr);
-      html += `<tr><td style="text-align:left">${esc(pr)}</td>
+      html += `<tr class="${isHandled(b, pr) ? "" : "tr-unhandled"}"><td style="text-align:left">${esc(pr)}</td>
        <td><input class="fld-lot" data-broker="${esc(b)}" data-pair="${esc(pr)}" inputmode="numeric" placeholder="例:10,000" value="${cur && cur.lotSize ? num(cur.lotSize).toLocaleString('ja-JP') : ''}" style="${inputStyle(80,'center')}"><span style="margin-left:4px;font-size:12px;color:var(--ink-2)">通貨</span></td>
         <td><input class="fld-maxpos" data-broker="${esc(b)}" data-pair="${esc(pr)}" inputmode="numeric" placeholder="例:50" value="${cur && cur.maxPosition ? num(cur.maxPosition).toLocaleString('ja-JP') : ''}" style="${inputStyle(80)}"><span style="margin-left:4px;font-size:12px;color:var(--ink-2)">${capUnit}</span></td>
       </tr>`;
@@ -862,6 +993,7 @@ function bindView(){
   v.querySelectorAll("[data-edit-week]").forEach(b => b.onclick = () => openWeek(state.weeks.find(w=>w.id===b.dataset.editWeek)));
   v.querySelectorAll("[data-edit-pos]").forEach(b => b.onclick = () => openPos(state.positions.find(w=>w.id===b.dataset.editPos)));
   v.querySelectorAll(".holdseg button").forEach(b => b.onclick = () => { holdView[b.parentNode.dataset.broker] = b.dataset.v; render(); });
+  bindBrokerDrag(v);
   v.querySelectorAll("[data-edit-closed]").forEach(b => b.onclick = () => openClosed(state.closed.find(w=>w.id===b.dataset.editClosed)));
   v.querySelectorAll("[data-edit-cash]").forEach(b => b.onclick = () => openCash(state.cash.find(w=>w.id===b.dataset.editCash)));
   v.querySelectorAll("[data-edit-milestone]").forEach(b => b.onclick = () => openMilestone(state.milestones.find(w=>w.id===b.dataset.editMilestone)));
@@ -870,7 +1002,7 @@ function bindView(){
   v.querySelectorAll(".fld-lot").forEach(i => {
     i.dataset.orig = i.value;
     i.oninput = () => { i.value = i.value.replace(/[^\d]/g,""); };
-    i.onblur = () => { if (i.value === i.dataset.orig) return; const n2 = num(i.value); i.value = n2 ? n2.toLocaleString("ja-JP") : ""; i.dataset.orig = i.value; saveSetting(i.dataset.broker, i.dataset.pair, {lotSize:n2}); };
+    i.onblur = async () => { if (i.value === i.dataset.orig) return; const n2 = num(i.value); i.value = n2 ? n2.toLocaleString("ja-JP") : ""; i.dataset.orig = i.value; if (await saveSetting(i.dataset.broker, i.dataset.pair, {lotSize:n2})) render(); };
   });
   v.querySelectorAll(".fld-minlot").forEach(i => {
     i.dataset.orig = i.value;
@@ -879,7 +1011,7 @@ function bindView(){
   v.querySelectorAll(".fld-maxpos").forEach(i => {
     i.dataset.orig = i.value;
     i.oninput = () => { i.value = i.value.replace(/[^\d]/g,""); };
-    i.onblur = () => { if (i.value === i.dataset.orig) return; const n2 = num(i.value); i.value = n2 ? n2.toLocaleString("ja-JP") : ""; i.dataset.orig = i.value; saveSetting(i.dataset.broker, i.dataset.pair, {maxPosition:n2}); };
+    i.onblur = async () => { if (i.value === i.dataset.orig) return; const n2 = num(i.value); i.value = n2 ? n2.toLocaleString("ja-JP") : ""; i.dataset.orig = i.value; if (await saveSetting(i.dataset.broker, i.dataset.pair, {maxPosition:n2})) render(); };
   });
   v.querySelectorAll(".sidebtn").forEach(bn => bn.onclick = async () => { const b = bn.dataset.broker, pr = bn.dataset.pair; if (await saveSetting(b, pr, {swapSide: swapSideOf(b, pr) === "sell" ? "buy" : "sell"})) render(); });
   v.querySelectorAll(".fld-swap").forEach(i => {
@@ -894,20 +1026,39 @@ function bindView(){
 }
 
 /* ---------- sheet ---------- */
-let lastFocus = null;
+let lastFocus = null, lockedScrollY = 0, bodyLocked = false;
+function lockBodyScroll(){
+  if (bodyLocked) return;
+  bodyLocked = true;
+  lockedScrollY = window.scrollY || window.pageYOffset || 0;
+  document.body.style.position = "fixed";
+  document.body.style.top = (-lockedScrollY) + "px";
+  document.body.style.left = "0"; document.body.style.right = "0";
+  document.body.style.width = "100%";
+}
+function unlockBodyScroll(){
+  if (!bodyLocked) return;
+  bodyLocked = false;
+  document.body.style.position = ""; document.body.style.top = "";
+  document.body.style.left = ""; document.body.style.right = ""; document.body.style.width = "";
+  window.scrollTo(0, lockedScrollY);
+}
 function openSheet(title, body){
   lastFocus = document.activeElement;
   const s = $("#sheetIn");
   s.oninput = null; s.onchange = null;
   s.innerHTML = `<h3>${esc(title)}<button class="close" aria-label="閉じる" data-close>×</button></h3>${body}`;
+  lockBodyScroll();
   $("#scrim").classList.add("open"); $("#sheet").classList.add("open");
   s.querySelector("[data-close]").onclick = closeSheet;
   setTimeout(() => s.querySelector("[data-close]").focus({preventScroll:true}), 60);
 }
-function closeSheet(){ $("#scrim").classList.remove("open"); $("#sheet").classList.remove("open"); if (lastFocus) lastFocus.focus?.(); }
+function closeSheet(){ $("#scrim").classList.remove("open"); $("#sheet").classList.remove("open"); unlockBodyScroll(); if (lastFocus) lastFocus.focus?.(); }
 $("#scrim").onclick = closeSheet;
 document.addEventListener("keydown", e => { if (e.key === "Escape") closeSheet(); });
 const field = (label, name, val, type="text", extra="") => `<label class="f"><span>${label}</span><input name="${name}" type="${type}" value="${esc(val ?? "")}" ${type==="text"&&/金|額|スワップ|損益|数|評価/.test(label)?'inputmode="decimal"':""} ${extra}></label>`;
+/* 3桁区切りで入力させたい欄に付ける（円・数量など、小数を使わない金額系の欄向け） */
+const bindComma = el => { if (el) el.oninput = () => { const d = el.value.replace(/[^\d]/g,""); el.value = d ? Number(d).toLocaleString("ja-JP") : ""; }; };
 const select = (label, name, val, opts) => `<label class="f"><span>${label}</span><select name="${name}">${val ? "" : `<option value="" selected disabled>選択してください</option>`}${[...new Set([...(val?[val]:[]),...opts])].map(o=>`<option ${o===val?"selected":""}>${esc(o)}</option>`).join("")}</select></label>`;
 const seg = (name, val, opts) => `<div class="seg" data-seg="${name}">${opts.map(([v,l])=>`<button type="button" data-v="${v}" aria-pressed="${v===val}">${l}</button>`).join("")}</div>`;
 const actions = (hasDelete) => `<div class="actions">${hasDelete ? `<button class="btn danger small" data-del>削除</button>` : ""}<div class="right"><button class="btn ghost" data-close2>やめる</button><button class="btn" data-save>保存する</button></div></div>`;
@@ -947,20 +1098,24 @@ function openWeek(w){
   const redraw = () => { s.querySelector("#bRows").innerHTML = brokerHtml(); bindRows(); };
   const bindRows = () => {
     s.querySelectorAll("[data-bx]").forEach(b => b.onclick = () => { brokers = readBrokers(); delete brokers[Object.keys(brokers)[b.dataset.bx]]; redraw(); sumUp(); });
-    s.querySelectorAll("[data-bv],[data-bn]").forEach(i => i.oninput = () => { brokers = readBrokers(); sumUp(); });
+    s.querySelectorAll("[data-bn]").forEach(i => i.oninput = () => { brokers = readBrokers(); sumUp(); });
+    s.querySelectorAll("[data-bv]").forEach(i => { i.oninput = () => { const d = i.value.replace(/[^\d]/g,""); i.value = d ? Number(d).toLocaleString("ja-JP") : ""; brokers = readBrokers(); sumUp(); }; });
   };
-  const sumUp = () => { const vals = Object.values(brokers).filter(v => v !== ""); if (vals.length) s.querySelector('[name="equity"]').value = vals.reduce((a,v)=>a+num(v),0); calc(); };
+  const sumUp = () => { const vals = Object.values(brokers).filter(v => v !== ""); if (vals.length) s.querySelector('[name="equity"]').value = vals.reduce((a,v)=>a+num(v),0).toLocaleString("ja-JP"); calc(); };
   const calc = () => {
     const v = formVals(), eq = num(v.equity), pr = num(v.principal), d = num(v.daily);
     s.querySelector("#wcalc").innerHTML = `<span>利益（評価−元金）</span><b class="${eq ? cls(eq-pr) : ""}">${eq ? signed(eq-pr) : "—"}</b><span>月間 / 年間スワップ</span><span>${yen(d*30)} / ${yen(d*365)}</span>`;
   };
   s.querySelector("#bAdd").onclick = () => { brokers = readBrokers(); const n = BROKERS.find(b => !(b in brokers)) || "業者" + (Object.keys(brokers).length+1); brokers[n] = ""; redraw(); };
   s.oninput = calc; bindRows(); calc();
+  ["equity","principal","daily"].forEach(n => bindComma(s.querySelector(`[name="${n}"]`)));
   wire(async () => {
     const v = formVals();
     if (!v.date || !num(v.equity)){ toast("記録日と有効評価額を入力してください"); return; }
     const b = readBrokers(), bClean = {}; for (const k in b) if (b[k] !== "") bClean[k] = num(b[k]);
-    const doc = {date:v.date, equity:num(v.equity), principal:num(v.principal), daily:num(v.daily), brokers:bClean, memo:v.memo};
+    const brokerSwap = {};
+    state.positions.forEach(p => { const bn = p.broker || "未設定"; brokerSwap[bn] = (brokerSwap[bn] || 0) + posDailySwap(p); });
+    const doc = {date:v.date, equity:num(v.equity), principal:num(v.principal), daily:num(v.daily), brokers:bClean, brokerSwap, memo:v.memo};
     if (w && w.date !== v.date) await removeDoc("weeks", w.id);
     if (await save("weeks", w && w.date === v.date ? w.id : null, doc)){ closeSheet(); toast("記録しました"); }
   }, () => removeDoc("weeks", w.id));
@@ -1088,6 +1243,8 @@ function openClosedBody(pos, c, nested){
     s.querySelector("#fxPlCalc").textContent = pl == null ? "—" : signed(pl);
   };
   s.oninput = recalcFx; s.onchange = recalcFx; recalcFx();
+  bindComma(s.querySelector('[name="units"]'));
+  bindComma(s.querySelector('[name="swapTotal"]'));
   wire(async () => {
     const v = formVals();
     const units = num(editableIdent ? v.units : pos.units);
