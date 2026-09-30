@@ -115,7 +115,7 @@ section h2 .act{font-family:var(--sans);font-size:13px;font-weight:500}
 .holdseg{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden;margin:0 0 10px}
 .brokerBlock{position:relative}
 .hi-anchor{position:relative;display:inline-block}
-.hi-anchor .hi-badge{position:absolute;top:-4px;left:-5px;font-size:6.5px;line-height:1;pointer-events:none}
+.hi-anchor .hi-badge{position:absolute;top:-6px;left:-7px;font-size:10px;line-height:1;pointer-events:none}
 .brokerBlock.dragging{opacity:.5;background:var(--paper-2)}
 .drag-handle{display:inline-block;cursor:grab;padding:2px 10px 2px 0;color:var(--ink-3);touch-action:none;user-select:none;font-size:15px;vertical-align:middle}
 .holdseg button{border:0;background:var(--card);padding:6px 14px;font-size:12.5px;color:var(--ink-2)}
@@ -323,7 +323,7 @@ async function saveSettingsBatch(broker, items){
 }
 /* 自動取得：取り扱いペア（基本情報の取引単位か建玉上限が入力済み）だけを、Edge Functionから取得して保存 */
 const FETCHABLE = ["外為どっとコム", "GMOクリック証券", "みんなのFX", "トライオートFX", "セントラル短資"];
-let swapAsOf = {}, swapFetching = false;
+let swapAsOf = JSON.parse(localStorage.getItem("swapAsOf") || "{}"), swapFetching = false;
 const isHandled = (b, pr) => { const c = settingFor(b, pr); return !!(c && (num(c.lotSize) > 0 || num(c.maxPosition) > 0)); };
 const weekSunday = dateStr => { const d = new Date(dateStr + "T00:00:00"); d.setDate(d.getDate() - d.getDay()); return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0"); };
 async function archiveSwapHistory(broker, results){
@@ -350,6 +350,7 @@ async function fetchSwapAuto(silent){
       const items = (data.results || []).map(r => ({pair: r.pair, swapPoint: r.swapPer10k, swapSide: r.side}));
       if (items.length && await saveSettingsBatch(b, items)){
         swapAsOf[b] = items.length ? data.results.map(r => r.date).sort().slice(-1)[0] : null;
+        localStorage.setItem("swapAsOf", JSON.stringify(swapAsOf));
         await archiveSwapHistory(b, data.results);
         if (!silent) notes.push(`${b}：${items.length}件を更新（${fmtDate(swapAsOf[b])}分）`);
       }
