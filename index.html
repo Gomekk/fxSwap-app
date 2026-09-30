@@ -114,6 +114,8 @@ section h2 .act{font-family:var(--sans);font-size:13px;font-weight:500}
 .broker{margin:18px 0 8px;font-size:13px;font-weight:700;color:var(--ink-2);display:flex;justify-content:space-between;padding-bottom:6px;border-bottom:1px solid var(--line)}
 .holdseg{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden;margin:0 0 10px}
 .brokerBlock{position:relative}
+.hi-anchor{position:relative;display:inline-block}
+.hi-anchor .hi-badge{position:absolute;top:-4px;left:-5px;font-size:6.5px;line-height:1;pointer-events:none}
 .brokerBlock.dragging{opacity:.5;background:var(--paper-2)}
 .drag-handle{display:inline-block;cursor:grab;padding:2px 10px 2px 0;color:var(--ink-3);touch-action:none;user-select:none;font-size:15px;vertical-align:middle}
 .holdseg button{border:0;background:var(--card);padding:6px 14px;font-size:12.5px;color:var(--ink-2)}
@@ -485,14 +487,14 @@ function viewTrend(){
   const maxProfit = Math.max(...ws.map(w => w.equity - w.principal));
   const allDiffs = ws.map((w,i) => i > 0 ? w.equity - ws[i-1].equity : null).filter(x => x != null);
   const maxDiff = allDiffs.length ? Math.max(...allDiffs) : null;
-  const ribbon = ok => ok ? ` <span style="font-size:10px" title="過去最高">🎗️</span>` : "";
+  const ribbon = ok => ok ? `<span class="hi-badge" title="過去最高">🎗️</span>` : "";
   for (let i = ws.length-1, n = 0; i >= 0 && n < limit; i--, n++){
     const w = ws[i], p = ws[i-1], d = p ? w.equity - p.equity : null, pr = w.equity - w.principal;
     html += `<li><button class="row wk" data-edit-week="${esc(w.id)}">
       <span class="date">${fmtDate(w.date)}</span>
-      <span class="mid">1日 ${yen(w.daily)}${ribbon(w.daily === maxDaily)}</span>
-      <span class="eq">${yen(w.equity)}${ribbon(w.equity === maxEquity)}</span>
-      <span class="sub">利益 <span class="${cls(pr)}">${signed(pr)}</span>${ribbon(pr === maxProfit)}${d != null ? `　前週比 <span class="${cls(d)}">${signed(d)}</span>${ribbon(maxDiff != null && d === maxDiff)}` : ""}</span>
+      <span class="mid"><span class="hi-anchor">1${ribbon(w.daily === maxDaily)}</span>日 ${yen(w.daily)}</span>
+      <span class="eq">${w.equity < 0 ? "−" : ""}<span class="hi-anchor">¥${ribbon(w.equity === maxEquity)}</span>${Math.round(Math.abs(w.equity)).toLocaleString("ja-JP")}</span>
+      <span class="sub"><span class="hi-anchor">利${ribbon(pr === maxProfit)}</span>益 <span class="${cls(pr)}">${signed(pr)}</span>${d != null ? `　<span class="hi-anchor">前${ribbon(maxDiff != null && d === maxDiff)}</span>週比 <span class="${cls(d)}">${signed(d)}</span>` : ""}</span>
     </button></li>`;
   }
   html += `</ul>${ws.length > 5 ? `<div style="text-align:center;margin-top:8px"><button class="linkbtn" data-act="toggleWeeks">${weeksExpanded ? "閉じる" : "全表示"}</button></div>` : ""}</section>`;
