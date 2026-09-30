@@ -139,7 +139,7 @@ table.sum{width:100%;border-collapse:collapse;font-size:13px}
 .tablebox{overflow-x:auto;border:1px solid var(--line);border-radius:4px;background:var(--card)}
 table.sum th,table.sum td{padding:8px 10px;text-align:right;white-space:nowrap;border-bottom:1px solid var(--line)}
 table.sum.tight th,table.sum.tight td{padding:6px 2px;font-size:12px}
-table.sum.tight th:first-child,table.sum.tight td:first-child{font-size:12.5px;padding-right:1px}
+table.sum.tight th:first-child,table.sum.tight td:first-child{font-size:12.5px;padding-left:10px;padding-right:1px}
 table.sum.tight input:disabled{opacity:.5;background:var(--paper-2)}
 .sidebtn{background:none;border:1px solid currentColor;border-radius:3px;font-size:11px;padding:2px 4px;margin-left:3px;cursor:pointer;vertical-align:middle}
 .sidebtn:disabled{opacity:.5;cursor:default}
@@ -749,14 +749,13 @@ function viewSettings(){
       <button class="setbtn" data-panel="basic"><span class="t">基本情報</span><span class="d">取引単位・最小Lot数・建玉上限</span></button>
       <button class="setbtn" data-panel="cash"><span class="t">入出金</span><span class="d">入金・出金・キャッシュバックの記録</span></button>
       <button class="setbtn" data-panel="swapmargin"><span class="t">スワップ/証拠金</span><span class="d">通貨ペアごとのスワップと必要証拠金</span></button>
-      <button class="setbtn" data-panel="swaptrend"><span class="t">スワップ推移</span><span class="d">通貨ペアごとの週次スワップの推移（会社別）</span></button>
     </div></section>`;
 }
 const BROKER_COLORS = {"外為どっとコム":"var(--violet)","GMOクリック証券":"var(--gold)","みんなのFX":"var(--bar)","トライオートFX":"var(--buy)","セントラル短資":"var(--sell)"};
 let swapTrendPair = null;
 function viewSettingsSwapTrend(){
   const pairs = [...new Set(state.swapHistory.map(h => h.pair))].sort();
-  let html = `<div class="subhead"><button class="linkbtn" data-back>← 設定</button></div>
+  let html = `<div class="subhead"><button class="linkbtn" data-back="swapmargin">← スワップ/証拠金</button></div>
     <h2 style="margin:8px 0 4px">スワップ推移</h2>
     <p class="hint">自動取得のたびに、その週（日曜始まり）の最新値で記録します。</p>`;
   if (!pairs.length) return html + `<div class="empty">まだ記録がありません。自動取得を行うと、ここに表示されます。</div>`;
@@ -812,20 +811,20 @@ function viewSettingsSwapMargin(){
   let html = `<div class="subhead"><button class="linkbtn" data-back>← 設定</button></div>
     <h2 style="margin:8px 0 4px">スワップ/証拠金</h2>
     <div style="display:flex;align-items:center;gap:10px;margin:10px 0 12px"><div class="seg mode-seg" style="width:220px;flex:0 0 auto"><button data-v="auto" aria-pressed="${auto}">自動取得</button><button data-v="manual" aria-pressed="${!auto}">手動入力</button></div><button class="btn small" data-act="fetchSwap" ${auto && !swapFetching ? "" : "disabled"}>${swapFetching ? "取得中…" : "記録する"}</button></div>
-    <p class="hint">スワップ（円/日）と証拠金（円）は、全社「1万通貨あたり」に換算して入力します（自動取得した値も1万通貨あたりに換算して保存します）。スワップは買い・売りのうちプラスになる方を、数字の右の「買/売」で選びます。見出しのリンクから公式ページを開けます。空欄の項目はチェックされません。</p>`;
+    <button class="linkbtn" data-panel="swaptrend">過去のスワップ推移 →</button>`;
   BROKERS.forEach(b => {
     const urls = BROKER_URLS[b] || {};
     const swHead = urls.swap ? `<a href="${urls.swap}" target="_blank" rel="noopener" style="color:inherit">スワップ</a>` : "スワップ";
     const mgHead = urls.margin ? `<a href="${urls.margin}" target="_blank" rel="noopener" style="color:inherit">証拠金</a>` : "証拠金";
     html += `<div class="broker"><span>${esc(b)}</span><span style="font-weight:500;font-size:12px">${swapAsOf[b] ? `取得 ${fmtDate(swapAsOf[b])}分` : (FETCHABLE.includes(b) ? "" : "自動取得は未対応")}</span></div>
-      <div class="tablebox"><table class="sum tight" style="width:100%"><thead><tr><th style="text-align:left">通貨ペア</th><th>${swHead}</th><th>${mgHead}</th><th>÷SW</th></tr></thead><tbody>`;
+      <div class="tablebox"><table class="sum tight" style="width:100%"><thead><tr><th style="text-align:left">通貨ペア</th><th style="text-align:center">${swHead}</th><th style="text-align:center">${mgHead}</th><th>÷SW</th></tr></thead><tbody>`;
     pairsFor(b).forEach(pr => {
       const cur = settingFor(b, pr);
       const sw = cur && cur.swapPoint, mg = cur && cur.marginRequired;
       const ratio = sw && mg && num(sw) !== 0 ? (num(mg) / num(sw)).toLocaleString("ja-JP",{maximumFractionDigits:1}) : "—";
       html += `<tr><td style="text-align:left">${esc(pr)}</td>
-        <td><input class="fld-swap" data-broker="${esc(b)}" data-pair="${esc(pr)}" inputmode="decimal" placeholder="15" value="${sw != null ? sw : ''}" style="${inputStyle(56,'center')}" ${auto?"disabled":""}><button class="sidebtn ${swapSideOf(b,pr)==="sell"?"tag-sell":"tag-buy"}" data-broker="${esc(b)}" data-pair="${esc(pr)}" ${auto?"disabled":""}>${swapSideOf(b,pr)==="sell"?"売":"買"}</button></td>
-        <td><input class="fld-margin" data-broker="${esc(b)}" data-pair="${esc(pr)}" inputmode="numeric" placeholder="5000" value="${mg ? num(mg).toLocaleString('ja-JP') : ''}" style="${inputStyle(64,'center')}" ${auto?"disabled":""}></td>
+        <td style="text-align:center"><span style="display:inline-flex;align-items:center;gap:3px"><input class="fld-swap" data-broker="${esc(b)}" data-pair="${esc(pr)}" inputmode="decimal" placeholder="15" value="${sw != null ? sw : ''}" style="${inputStyle(56,'center')}" ${auto?"disabled":""}><button class="sidebtn ${swapSideOf(b,pr)==="sell"?"tag-sell":"tag-buy"}" data-broker="${esc(b)}" data-pair="${esc(pr)}" ${auto?"disabled":""}>${swapSideOf(b,pr)==="sell"?"売":"買"}</button></span></td>
+        <td style="text-align:center"><input class="fld-margin" data-broker="${esc(b)}" data-pair="${esc(pr)}" inputmode="numeric" placeholder="5000" value="${mg ? num(mg).toLocaleString('ja-JP') : ''}" style="${inputStyle(64,'center')}" ${auto?"disabled":""}></td>
         <td>${ratio}${ratio !== "—" ? "日" : ""}</td>
       </tr>`;
     });
@@ -867,7 +866,7 @@ function bindView(){
   v.querySelectorAll("[data-edit-cash]").forEach(b => b.onclick = () => openCash(state.cash.find(w=>w.id===b.dataset.editCash)));
   v.querySelectorAll("[data-edit-milestone]").forEach(b => b.onclick = () => openMilestone(state.milestones.find(w=>w.id===b.dataset.editMilestone)));
   v.querySelectorAll("[data-panel]").forEach(b => b.onclick = () => { settingsView = b.dataset.panel; render(); });
-  v.querySelectorAll("[data-back]").forEach(b => b.onclick = () => { settingsView = null; render(); });
+  v.querySelectorAll("[data-back]").forEach(b => b.onclick = () => { settingsView = b.dataset.back || null; render(); });
   v.querySelectorAll(".fld-lot").forEach(i => {
     i.dataset.orig = i.value;
     i.oninput = () => { i.value = i.value.replace(/[^\d]/g,""); };
