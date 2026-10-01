@@ -503,7 +503,7 @@ function viewTrend(){
     <p class="rate">${dSw != null ? `前週比 <b class="${cls(dSw)}">${signed(dSw)}</b>　` : ""}評価額に対する年間スワップ <b>${yieldPct.toFixed(0)}%</b></p>
     <dl>
       <div><dt>有効評価額</dt><dd>${yen(last.equity)}${dEq != null ? `<span class="d ${cls(dEq)}">前週比 ${signed(dEq)}</span>` : ""}</dd></div>
-      <div><dt>利益（評価−元金＋実現損益）</dt><dd class="${cls(profit)}">${signed(profit)}<span class="d" style="color:var(--ink-3)">元金 ${yen(last.principal)}</span></dd></div>
+      <div><dt style="font-size:10.5px;white-space:nowrap">利益（評価−元金＋実現損益）</dt><dd class="${cls(profit)}">${signed(profit)}<span class="d" style="color:var(--ink-3)">元金 ${yen(last.principal)}</span></dd></div>
       <div><dt>月間スワップ</dt><dd>${yen(monthly(last))}</dd></div>
       <div><dt>年間スワップ</dt><dd>${yen(yearly(last))}</dd></div>
     </dl></div>
@@ -565,8 +565,8 @@ function chart(ws){
   if (data.length < 2) return `<p class="hint">2週分以上の記録がたまるとグラフが表示されます。</p>`;
   const W = window.innerWidth < 600 ? 460 : 720, H = window.innerWidth < 600 ? 230 : 250, L = 58, Rt = 66, T = 14, B = 30, iw = W-L-Rt, ih = H-T-B;
   const sScale = niceScale(0, Math.max(...data.map(w => w.daily), 0), 5);
-  const eqs = data.map(w => w.equity);
-  const eScale = niceScale(0, Math.max(...eqs, 0), 5);
+  const barTop = w => num(w.equity) + Math.max(0, realizedPLAsOf(w.date));
+  const eScale = niceScale(0, Math.max(...data.map(barTop), 0), 5);
   const s0 = sScale.min, s1 = sScale.max, e0 = eScale.min, e1 = eScale.max;
   const ticks = Math.round((s1 - s0) / sScale.step);
   const bw = iw / data.length;
@@ -585,14 +585,17 @@ function chart(ws){
   const eqW = bw*0.62;
   const yBase = ye(e0);
   data.forEach((w,i) => {
-    const ex = xs(i) - eqW/2, principal = Math.max(0, num(w.principal)), equity = num(w.equity), yTop = ye(equity);
+    const ex = xs(i) - eqW/2, principal = Math.max(0, num(w.principal)), equity = num(w.equity), realized = realizedPLAsOf(w.date);
+    const rect = (lo, hi, color, title) => { const y0 = ye(lo), y1 = ye(hi); if (y0-y1 <= 0) return; s += `<rect x="${ex.toFixed(1)}" y="${y1.toFixed(1)}" width="${eqW.toFixed(1)}" height="${(y0-y1).toFixed(1)}" fill="${color}" rx="1"><title>${fmtDate(w.date)} ${title}</title></rect>`; };
+    let cursor = 0;
     if (equity >= principal){
-      const yPrin = ye(principal);
-      s += `<rect x="${ex.toFixed(1)}" y="${yPrin.toFixed(1)}" width="${eqW.toFixed(1)}" height="${(yBase-yPrin).toFixed(1)}" fill="var(--gold)" rx="1"><title>${fmtDate(w.date)} 元金 ${yen(principal)}</title></rect>`;
-      s += `<rect x="${ex.toFixed(1)}" y="${yTop.toFixed(1)}" width="${eqW.toFixed(1)}" height="${(yPrin-yTop).toFixed(1)}" fill="var(--gain)" rx="1"><title>${fmtDate(w.date)} 利益 ${signed(equity-principal)}</title></rect>`;
+      rect(cursor, cursor+principal, "var(--gold)", `元金 ${yen(principal)}`); cursor += principal;
+      const unreal = equity - principal;
+      rect(cursor, cursor+unreal, "var(--gain)", `含み益（未確定） ${signed(unreal)}`); cursor += unreal;
     } else {
-      s += `<rect x="${ex.toFixed(1)}" y="${yTop.toFixed(1)}" width="${eqW.toFixed(1)}" height="${(yBase-yTop).toFixed(1)}" fill="var(--loss)" rx="1"><title>${fmtDate(w.date)} 有効評価額 ${yen(equity)}（元金割れ）</title></rect>`;
+      rect(0, equity, "var(--loss)", `有効評価額 ${yen(equity)}（元金割れ）`); cursor = equity;
     }
+    if (realized > 0) rect(cursor, cursor+realized, "var(--violet)", `確定益 ${signed(realized)}`);
   });
   let lastMonth = null;
   data.forEach((w,i) => {
@@ -603,7 +606,7 @@ function chart(ws){
   s += `<polyline points="${data.map((w,i)=>xs(i).toFixed(1)+","+ys(w.daily).toFixed(1)).join(" ")}" fill="none" stroke="var(--violet)" stroke-width="2.2" stroke-linejoin="round"/>`;
   data.forEach((w,i) => s += `<circle cx="${xs(i).toFixed(1)}" cy="${ys(w.daily).toFixed(1)}" r="3" fill="var(--card)" stroke="var(--violet)" stroke-width="1.6"><title>${fmtDate(w.date)} 1日 ${yen(w.daily)}</title></circle>`);
   s += `</svg>`;
-  return `<div class="chart"><div class="legend"><span><i style="background:var(--violet);height:3px;vertical-align:3px"></i>1日あたりスワップ（左）</span><span><i style="background:var(--gold)"></i>元金</span><span><i style="background:var(--gain)"></i>利益（右）</span></div>${s}</div>`;
+  return `<div class="chart"><div class="legend"><span><i style="background:var(--violet);height:3px;vertical-align:3px"></i>1日あたりスワップ（左）</span><span><i style="background:var(--gold)"></i>元金</span><span><i style="background:var(--gain)"></i>含み益（未確定）</span><span><i style="background:var(--violet)"></i>確定益（右）</span></div>${s}</div>`;
 }
 
 /* 週次記録に保存された、その時点の証券会社ごとの1日あたりスワップ（brokerSwap）から、月間累計を見積もる（1週あたり×7日で計算） */
