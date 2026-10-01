@@ -1,0 +1,393 @@
+{
+ "updatedAt": "2026-10-01T18:04:30.188Z",
+ "brokers": {
+  "外為どっとコム": {
+   "results": [
+    {
+     "pair": "TRY/JPY",
+     "side": "buy",
+     "swapPer10k": 24,
+     "buy": 24,
+     "sell": -34,
+     "date": "2026-09-29",
+     "unit": 10000
+    },
+    {
+     "pair": "MXN/JPY",
+     "side": "buy",
+     "swapPer10k": 12,
+     "buy": 12,
+     "sell": -17,
+     "date": "2026-09-29",
+     "unit": 10000
+    },
+    {
+     "pair": "ZAR/JPY",
+     "side": "buy",
+     "swapPer10k": 13,
+     "buy": 13,
+     "sell": -18,
+     "date": "2026-09-29",
+     "unit": 10000
+    },
+    {
+     "pair": "HUF/JPY",
+     "side": "buy",
+     "swapPer10k": 0.5,
+     "buy": 5,
+     "sell": -10,
+     "date": "2026-09-29",
+     "unit": 100000
+    },
+    {
+     "pair": "PLN/JPY",
+     "side": "buy",
+     "swapPer10k": 28,
+     "buy": 28,
+     "sell": -38,
+     "date": "2026-09-29",
+     "unit": 10000
+    },
+    {
+     "pair": "CHF/MXN",
+     "side": "sell",
+     "swapPer10k": 217,
+     "buy": -305,
+     "sell": 217,
+     "date": "2026-09-29",
+     "unit": 10000
+    },
+    {
+     "pair": "CHF/TRY",
+     "side": "sell",
+     "swapPer10k": 1587,
+     "buy": -1988,
+     "sell": 1587,
+     "date": "2026-09-29",
+     "unit": 10000
+    },
+    {
+     "pair": "CHF/ZAR",
+     "side": "sell",
+     "swapPer10k": 191,
+     "buy": -287,
+     "sell": 191,
+     "date": "2026-09-29",
+     "unit": 10000
+    }
+   ],
+   "skipped": []
+  },
+  "GMOクリック証券": {
+   "results": [
+    {
+     "pair": "TRY/JPY",
+     "side": "buy",
+     "swapPer10k": 25,
+     "buy": 25,
+     "sell": -25,
+     "date": "2026-10-01",
+     "unit": 10000
+    },
+    {
+     "pair": "MXN/JPY",
+     "side": "buy",
+     "swapPer10k": 15,
+     "buy": 150,
+     "sell": -150,
+     "date": "2026-10-01",
+     "unit": 100000
+    },
+    {
+     "pair": "ZAR/JPY",
+     "side": "buy",
+     "swapPer10k": 14.5,
+     "buy": 145,
+     "sell": -145,
+     "date": "2026-10-01",
+     "unit": 100000
+    },
+    {
+     "pair": "HUF/JPY",
+     "side": "buy",
+     "swapPer10k": 1.2,
+     "buy": 12,
+     "sell": -12,
+     "date": "2026-10-01",
+     "unit": 100000
+    },
+    {
+     "pair": "PLN/JPY",
+     "side": "buy",
+     "swapPer10k": 30,
+     "buy": 30,
+     "sell": -30,
+     "date": "2026-10-01",
+     "unit": 10000
+    }
+   ],
+   "skipped": [
+    {
+     "pair": "CHF/MXN",
+     "reason": "GMOクリック証券では取り扱いなし"
+    },
+    {
+     "pair": "CHF/TRY",
+     "reason": "GMOクリック証券では取り扱いなし"
+    },
+    {
+     "pair": "CHF/ZAR",
+     "reason": "GMOクリック証券では取り扱いなし"
+    }
+   ]
+  },
+  "みんなのFX": {
+   "results": [
+    {
+     "pair": "TRY/JPY",
+     "side": "buy",
+     "swapPer10k": 24.1,
+     "buy": 24.1,
+     "sell": -24.1,
+     "date": "2026-10-01",
+     "unit": 10000
+    },
+    {
+     "pair": "TRY/JPY(LIGHT)",
+     "side": "buy",
+     "swapPer10k": 24.3,
+     "buy": 24.3,
+     "sell": -24.3,
+     "date": "2026-10-01",
+     "unit": 10000
+    },
+    {
+     "pair": "MXN/JPY",
+     "side": "buy",
+     "swapPer10k": 14.1,
+     "buy": 14.1,
+     "sell": -14.1,
+     "date": "2026-10-01",
+     "unit": 10000
+    },
+    {
+     "pair": "MXN/JPY(LIGHT)",
+     "side": "buy",
+     "swapPer10k": 14.3,
+     "buy": 14.3,
+     "sell": -14.3,
+     "date": "2026-10-01",
+     "unit": 10000
+    },
+    {
+     "pair": "ZAR/JPY",
+     "side": "buy",
+     "swapPer10k": 14.1,
+     "buy": 14.1,
+     "sell": -14.1,
+     "date": "2026-10-01",
+     "unit": 10000
+    },
+    {
+     "pair": "ZAR/JPY(LIGHT)",
+     "side": "buy",
+     "swapPer10k": 14.6,
+     "buy": 14.6,
+     "sell": -14.6,
+     "date": "2026-10-01",
+     "unit": 10000
+    },
+    {
+     "pair": "HUF/JPY",
+     "side": "buy",
+     "swapPer10k": 0.6,
+     "buy": 6,
+     "sell": -6,
+     "date": "2026-10-01",
+     "unit": 100000
+    },
+    {
+     "pair": "HUF/JPY(LIGHT)",
+     "side": "buy",
+     "swapPer10k": 1.2,
+     "buy": 12,
+     "sell": -12,
+     "date": "2026-10-01",
+     "unit": 100000
+    },
+    {
+     "pair": "PLN/JPY",
+     "side": "buy",
+     "swapPer10k": 30,
+     "buy": 30,
+     "sell": -30,
+     "date": "2026-10-01",
+     "unit": 10000
+    },
+    {
+     "pair": "CHF/MXN",
+     "side": "sell",
+     "swapPer10k": 254.5,
+     "buy": -254.7,
+     "sell": 254.5,
+     "date": "2026-10-01",
+     "unit": 10000
+    },
+    {
+     "pair": "CHF/TRY",
+     "side": "sell",
+     "swapPer10k": 1397.6,
+     "buy": -1402.9,
+     "sell": 1397.6,
+     "date": "2026-10-01",
+     "unit": 10000
+    },
+    {
+     "pair": "CHF/ZAR",
+     "side": "sell",
+     "swapPer10k": 188.9,
+     "buy": -189.1,
+     "sell": 188.9,
+     "date": "2026-10-01",
+     "unit": 10000
+    }
+   ],
+   "skipped": []
+  },
+  "トライオートFX": {
+   "results": [
+    {
+     "pair": "TRY/JPY",
+     "side": "buy",
+     "swapPer10k": 24.4,
+     "buy": 24.4,
+     "sell": -37.4,
+     "date": "2026-09-29",
+     "unit": 10000
+    },
+    {
+     "pair": "MXN/JPY",
+     "side": "buy",
+     "swapPer10k": 15.4,
+     "buy": 15.4,
+     "sell": -30.6,
+     "date": "2026-09-29",
+     "unit": 10000
+    },
+    {
+     "pair": "ZAR/JPY",
+     "side": "buy",
+     "swapPer10k": 14.4,
+     "buy": 14.4,
+     "sell": -29.4,
+     "date": "2026-09-29",
+     "unit": 10000
+    },
+    {
+     "pair": "HUF/JPY",
+     "side": "buy",
+     "swapPer10k": 1.3,
+     "buy": 1.3,
+     "sell": -1.8,
+     "date": "2026-09-29",
+     "unit": 10000
+    },
+    {
+     "pair": "PLN/JPY",
+     "side": "buy",
+     "swapPer10k": 30,
+     "buy": 30,
+     "sell": -42,
+     "date": "2026-09-29",
+     "unit": 10000
+    },
+    {
+     "pair": "CHF/MXN",
+     "side": "sell",
+     "swapPer10k": 305,
+     "buy": -425,
+     "sell": 305,
+     "date": "2026-09-29",
+     "unit": 10000
+    },
+    {
+     "pair": "CHF/TRY",
+     "side": "sell",
+     "swapPer10k": 1550,
+     "buy": -2150,
+     "sell": 1550,
+     "date": "2026-09-29",
+     "unit": 10000
+    },
+    {
+     "pair": "CHF/ZAR",
+     "side": "sell",
+     "swapPer10k": 270,
+     "buy": -390,
+     "sell": 270,
+     "date": "2026-09-29",
+     "unit": 10000
+    }
+   ],
+   "skipped": []
+  },
+  "セントラル短資": {
+   "results": [
+    {
+     "pair": "TRY/JPY",
+     "side": "buy",
+     "swapPer10k": 24.5,
+     "buy": 24.5,
+     "sell": -24.5,
+     "date": "2026-10-01",
+     "unit": 10000
+    },
+    {
+     "pair": "MXN/JPY",
+     "side": "buy",
+     "swapPer10k": 14.1,
+     "buy": 14.1,
+     "sell": -16.1,
+     "date": "2026-10-01",
+     "unit": 10000
+    },
+    {
+     "pair": "ZAR/JPY",
+     "side": "buy",
+     "swapPer10k": 14.3,
+     "buy": 14.3,
+     "sell": -14.3,
+     "date": "2026-10-01",
+     "unit": 10000
+    },
+    {
+     "pair": "HUF/JPY",
+     "side": "buy",
+     "swapPer10k": 0.8,
+     "buy": 0.8,
+     "sell": -0.8,
+     "date": "2026-10-01",
+     "unit": 10000
+    }
+   ],
+   "skipped": [
+    {
+     "pair": "PLN/JPY",
+     "reason": "セントラル短資では取り扱いなし"
+    },
+    {
+     "pair": "CHF/MXN",
+     "reason": "セントラル短資では取り扱いなし"
+    },
+    {
+     "pair": "CHF/TRY",
+     "reason": "セントラル短資では取り扱いなし"
+    },
+    {
+     "pair": "CHF/ZAR",
+     "reason": "セントラル短資では取り扱いなし"
+    }
+   ]
+  }
+ }
+}
