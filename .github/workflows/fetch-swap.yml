@@ -1,0 +1,26 @@
+name: スワップ取得
+
+on:
+  schedule:
+    - cron: "30 22 * * *"   # 毎日 日本時間 7:30 ごろ（GitHubの混雑で少し遅れることがあります）
+  workflow_dispatch:         # Actions画面の「Run workflow」で手動実行もできる
+
+permissions:
+  contents: write
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: スワップを取得
+        run: node scripts/fetch-swap.mjs
+      - name: swap.json を保存
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add swap.json
+          git diff --cached --quiet || (git commit -m "スワップを更新" && git push)
