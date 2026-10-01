@@ -628,7 +628,6 @@ function monthlySwapSummary(){
 function monthlySwapChart(){
   const byMonth = monthlySwapSummary();
   const months = Object.keys(byMonth).sort();
-  const manualMonths = new Set(state.monthlySwap.map(r => r.month));
   const brokersSeen = BROKERS.filter(b => months.some(mo => byMonth[mo][b] > 0));
   if (!months.length || !brokersSeen.length) return `<p class="hint">週ごとの記録がたまるか、下の「＋ 記録」から手動で入力すると、月ごとのスワップ実績が表示されます。</p>`;
   const totals = months.map(mo => brokersSeen.reduce((s,b) => s + (byMonth[mo][b] || 0), 0));
@@ -659,9 +658,9 @@ function monthlySwapChart(){
   s += `</svg>`;
   const legend = brokersSeen.map(b => `<span><i style="background:${BROKER_COLORS[b]||"var(--ink-2)"}"></i>${esc(BROKER_SHORT[b]||b)}</span>`).join("");
   let html = `<div class="chart"><div class="legend">${legend}</div>${s}</div>
-    <div class="tablebox" style="margin-top:10px"><table class="sum tight" style="width:100%"><thead><tr><th style="text-align:left">月</th><th style="background:var(--paper-2)">計</th>${brokersSeen.map(b => `<th>${esc(BROKER_SHORT[b]||b)}</th>`).join("")}</tr></thead><tbody>`;
+    <div class="tablebox" style="margin-top:10px"><table class="sum tight" style="width:100%"><thead><tr><th style="text-align:left">月</th><th style="background:rgba(76,163,224,.18)">計</th>${brokersSeen.map(b => `<th>${esc(BROKER_SHORT[b]||b)}</th>`).join("")}</tr></thead><tbody>`;
   months.forEach((mo,i) => {
-    html += `<tr data-edit-monthlyswap="${mo}" style="cursor:pointer"><td style="text-align:left">${mo.replace("-",".")}${manualMonths.has(mo) ? ` <span style="font-size:9px;color:var(--ink-3)">手動</span>` : ""}</td><td style="background:var(--paper-2);font-weight:700">${yen(totals[i])}</td>${brokersSeen.map(b => `<td>${yen(byMonth[mo][b]||0)}</td>`).join("")}</tr>`;
+    html += `<tr data-edit-monthlyswap="${mo}" style="cursor:pointer"><td style="text-align:left">${mo.replace("-",".")}</td><td style="background:rgba(76,163,224,.18);font-weight:700">${yen(totals[i])}</td>${brokersSeen.map(b => `<td>${yen(byMonth[mo][b]||0)}</td>`).join("")}</tr>`;
   });
   return html + `</tbody></table></div>`;
 }
