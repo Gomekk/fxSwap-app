@@ -1,6 +1,6 @@
 // FXスワップ管理 Service Worker
-// アプリの画面ファイルだけを扱い、Supabaseなど外部への通信には一切手を出さない
-const CACHE = "fxswap-v2";
+// アプリの画面ファイルだけを扱う。swap.json（毎日更新されるスワップ）と外部への通信には手を出さない
+const CACHE = "fxswap-v3";
 const FILES = ["./", "./index.html", "./manifest.json", "./icon-192.png", "./icon-512.png", "./apple-touch-icon.png"];
 
 self.addEventListener("install", e => {
@@ -16,6 +16,7 @@ self.addEventListener("activate", e => {
 self.addEventListener("fetch", e => {
   const url = new URL(e.request.url);
   if (e.request.method !== "GET" || url.origin !== self.location.origin) return; // 外部はそのままネットへ
+  if (url.pathname.endsWith("/swap.json")) return; // スワップのデータは毎回ネットから直接読む
   // 通信のキャッシュを使わず必ず最新を取りに行き、オフラインのときだけ保存済みを使う
   e.respondWith(
     fetch(e.request, { cache: "no-store" })
