@@ -606,7 +606,7 @@ function chart(ws){
   s += `<polyline points="${data.map((w,i)=>xs(i).toFixed(1)+","+ys(w.daily).toFixed(1)).join(" ")}" fill="none" stroke="var(--violet)" stroke-width="2.2" stroke-linejoin="round"/>`;
   data.forEach((w,i) => s += `<circle cx="${xs(i).toFixed(1)}" cy="${ys(w.daily).toFixed(1)}" r="3" fill="var(--card)" stroke="var(--violet)" stroke-width="1.6"><title>${fmtDate(w.date)} 1日 ${yen(w.daily)}</title></circle>`);
   s += `</svg>`;
-  return `<div class="chart"><div class="legend"><span><i style="background:var(--violet);height:3px;vertical-align:3px"></i>1日あたりスワップ（左）</span><span><i style="background:var(--gold)"></i>元金</span><span><i style="background:var(--gain)"></i>含み益（未確定）</span><span><i style="background:var(--violet)"></i>確定益（右）</span></div>${s}</div>`;
+  return `<div class="chart"><div class="legend"><span><i style="background:var(--violet);height:3px;vertical-align:3px"></i>1日あたりスワップ</span><span><i style="background:var(--gold)"></i>元金</span><span><i style="background:var(--gain)"></i>含み益</span><span><i style="background:var(--violet)"></i>確定益</span></div>${s}</div>`;
 }
 
 /* 週次記録に保存された、その時点の証券会社ごとの1日あたりスワップ（brokerSwap）から、月間累計を見積もる（1週あたり×7日で計算） */
