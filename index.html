@@ -117,6 +117,12 @@ section h2 .act{font-family:var(--sans);font-size:13px;font-weight:500}
 .hi-anchor{position:relative;display:inline-block}
 .hi-anchor .hi-badge{position:absolute;top:-6px;left:-7px;font-size:10px;line-height:1;pointer-events:none}
 .brokerBlock.dragging{background:var(--card);box-shadow:0 6px 18px rgba(0,0,0,.18);z-index:5;transition:none}
+.medal{opacity:1 !important;font-weight:700;color:var(--ink) !important;-webkit-text-fill-color:var(--ink)}
+.medal-1{border:2px solid #C9A227 !important;background:rgba(201,162,39,.10) !important;box-shadow:0 0 0 2px rgba(201,162,39,.25)}
+.medal-2{border:2px solid #A7ADB5 !important;background:rgba(167,173,181,.14) !important;box-shadow:0 0 0 2px rgba(167,173,181,.3)}
+.medal-3{border:2px solid #B87333 !important;background:rgba(184,115,51,.10) !important;box-shadow:0 0 0 2px rgba(184,115,51,.25)}
+.medal-dot{display:inline-block;width:10px;height:10px;border-radius:50%;vertical-align:-1px;margin-right:2px}
+.medal-dot.m1{background:#C9A227}.medal-dot.m2{background:#A7ADB5}.medal-dot.m3{background:#B87333}
 .drag-handle{display:inline-block;cursor:grab;padding:10px 12px 10px 2px;margin:-10px 0;-webkit-touch-callout:none;color:var(--ink-3);touch-action:none;user-select:none;font-size:15px;vertical-align:middle}
 .holdseg button{border:0;background:var(--card);padding:6px 14px;font-size:12.5px;color:var(--ink-2)}
 .holdseg button[aria-pressed="true"]{background:var(--ink);color:var(--paper);font-weight:700}
@@ -851,7 +857,7 @@ function viewHold(){
   html += `<div class="broker"><span>全証券会社合計</span><span>1日 ${signed(totalDaily)}</span></div>
     <div class="tablebox"><table class="sum" style="width:100%"><thead><tr><th style="text-align:left">通貨ペア</th><th>数量</th><th>スワップ</th><th>内訳</th></tr></thead><tbody>`;
   Object.entries(gAll).sort((a,c) => a[0].localeCompare(c[0])).forEach(([pair, agg]) => {
-    html += `<tr><td style="text-align:left">${esc(pair)}</td><td>${num(agg.units).toLocaleString("ja-JP")}通貨(${agg.lots}lot)</td><td class="${cls(agg.swap)}">${signed(agg.swap)}</td><td>${agg.buy ? `<span class="tag tag-buy">買${agg.buy}</span>` : ""}${agg.sell ? `<span class="tag tag-sell">売${agg.sell}</span>` : ""}</td></tr>`;
+    html += `<tr><td style="text-align:left">${esc(pair)}</td><td>${num(agg.units).toLocaleString("ja-JP")}通貨</td><td class="${cls(agg.swap)}">${signed(agg.swap)}</td><td>${agg.buy ? `<span class="tag tag-buy">買${agg.buy}</span>` : ""}${agg.sell ? `<span class="tag tag-sell">売${agg.sell}</span>` : ""}</td></tr>`;
   });
   html += `</tbody></table></div>`;
   const byB = {};
@@ -1135,6 +1141,12 @@ function viewSettingsSwapMargin(){
     <h2 style="margin:8px 0 4px">スワップ/証拠金</h2>
     <div style="display:flex;align-items:center;gap:10px;margin:10px 0 12px"><div class="seg mode-seg" style="width:220px;flex:0 0 auto"><button data-v="auto" aria-pressed="${auto}">自動取得</button><button data-v="manual" aria-pressed="${!auto}">手動入力</button></div><button class="btn small" data-act="fetchSwap" ${auto && !swapFetching ? "" : "disabled"}>${swapFetching ? "取得中…" : "記録する"}</button></div>
     <button class="linkbtn" data-panel="swaptrend">過去のスワップ推移 →</button>`;
+  /* 全社・全ペアのスワップ（1万通貨あたり）を比べて、高い順に1〜3位を金・銀・銅の枠にする（同額は同順位） */
+  const swVals = [];
+  BROKERS.forEach(b => pairsFor(b).forEach(pr => { const c = settingFor(b, pr); const v = c ? num(c.swapPoint) : 0; if (isHandled(b, pr) && v > 0) swVals.push(v); }));
+  const topVals = [...new Set(swVals)].sort((a, c) => c - a).slice(0, 3);
+  const medalOf = (b, pr) => { const c = settingFor(b, pr); const v = c ? num(c.swapPoint) : 0; const i = isHandled(b, pr) && v > 0 ? topVals.indexOf(v) : -1; return i < 0 ? "" : " medal medal-" + (i + 1); };
+  html += `<p class="hint" style="margin:6px 0 0"><span class="medal-dot m1"></span>金 <span class="medal-dot m2"></span>銀 <span class="medal-dot m3"></span>銅　各社の全ペアでスワップが高い順</p>`;
   BROKERS.forEach(b => {
     const urls = BROKER_URLS[b] || {};
     const swHead = urls.swap ? `<a href="${urls.swap}" target="_blank" rel="noopener" style="color:inherit">スワップ</a>` : "スワップ";
@@ -1146,7 +1158,7 @@ function viewSettingsSwapMargin(){
       const sw = cur && cur.swapPoint, mg = cur && cur.marginRequired;
       const ratio = sw && mg && num(sw) !== 0 ? (num(mg) / num(sw)).toLocaleString("ja-JP",{maximumFractionDigits:1}) : "—";
       html += `<tr class="${isHandled(b, pr) ? "" : "tr-unhandled"}"><td style="text-align:left">${esc(pr)}</td>
-        <td style="text-align:center"><span style="display:inline-flex;align-items:center;gap:3px"><input class="fld-swap" data-broker="${esc(b)}" data-pair="${esc(pr)}" inputmode="decimal" placeholder="15" value="${sw != null ? sw : ''}" style="${inputStyle(56,'center')}" ${auto?"disabled":""}><button class="sidebtn ${swapSideOf(b,pr)==="sell"?"tag-sell":"tag-buy"}" data-broker="${esc(b)}" data-pair="${esc(pr)}" ${auto?"disabled":""}>${swapSideOf(b,pr)==="sell"?"売":"買"}</button></span></td>
+        <td style="text-align:center"><span style="display:inline-flex;align-items:center;gap:3px"><input class="fld-swap${medalOf(b, pr)}" data-broker="${esc(b)}" data-pair="${esc(pr)}" inputmode="decimal" placeholder="15" value="${sw != null ? sw : ''}" style="${inputStyle(56,'center')}" ${auto?"disabled":""}><button class="sidebtn ${swapSideOf(b,pr)==="sell"?"tag-sell":"tag-buy"}" data-broker="${esc(b)}" data-pair="${esc(pr)}" ${auto?"disabled":""}>${swapSideOf(b,pr)==="sell"?"売":"買"}</button></span></td>
         <td style="text-align:center"><input class="fld-margin" data-broker="${esc(b)}" data-pair="${esc(pr)}" inputmode="numeric" placeholder="5000" value="${mg ? num(mg).toLocaleString('ja-JP') : ''}" style="${inputStyle(64,'center')}" ${auto?"disabled":""}></td>
         <td>${ratio}${ratio !== "—" ? "日" : ""}</td>
       </tr>`;
