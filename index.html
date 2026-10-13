@@ -116,8 +116,8 @@ section h2 .act{font-family:var(--sans);font-size:13px;font-weight:500}
 .brokerBlock{position:relative}
 .hi-anchor{position:relative;display:inline-block}
 .hi-anchor .hi-badge{position:absolute;top:-6px;left:-7px;font-size:10px;line-height:1;pointer-events:none}
-.brokerBlock.dragging{opacity:.5;background:var(--paper-2)}
-.drag-handle{display:inline-block;cursor:grab;padding:2px 10px 2px 0;color:var(--ink-3);touch-action:none;user-select:none;font-size:15px;vertical-align:middle}
+.brokerBlock.dragging{background:var(--card);box-shadow:0 6px 18px rgba(0,0,0,.18);z-index:5;transition:none}
+.drag-handle{display:inline-block;cursor:grab;padding:10px 12px 10px 2px;margin:-10px 0;-webkit-touch-callout:none;color:var(--ink-3);touch-action:none;user-select:none;font-size:15px;vertical-align:middle}
 .holdseg button{border:0;background:var(--card);padding:6px 14px;font-size:12.5px;color:var(--ink-2)}
 .holdseg button[aria-pressed="true"]{background:var(--ink);color:var(--paper);font-weight:700}
 .tag{display:inline-block;font-size:11px;padding:0 6px;border:1px solid currentColor;border-radius:3px;margin-left:6px;font-weight:500;vertical-align:1px}
@@ -773,46 +773,70 @@ function orderBrokers(names){
 /* 三本線を長押し(350ms)すると、証券会社の段をドラッグで並び替えられる */
 function bindBrokerDrag(root){
   root.querySelectorAll(".drag-handle").forEach(handle => {
+    handle.oncontextmenu = e => e.preventDefault();
     handle.onpointerdown = e => {
       const block = handle.closest(".brokerBlock");
       if (!block) return;
+      const blocks = [...block.parentNode.querySelectorAll(".brokerBlock")];
+      const idx = blocks.indexOf(block), pid = e.pointerId;
       const startX = e.clientX, startY = e.clientY;
-      let dragging = false;
-      const timer = setTimeout(() => { dragging = true; block.classList.add("dragging"); }, 350);
+      let dragging = false, newIdx = idx, rects = [], gap = 0;
+      const timer = setTimeout(() => {
+        dragging = true;
+        rects = blocks.map(el => el.getBoundingClientRect());
+        gap = blocks.length > 1 ? Math.max(0, (rects[1].top - rects[0].bottom)) : 0;
+        block.classList.add("dragging");
+        blocks.forEach(el => { if (el !== block) el.style.transition = "transform .15s"; });
+        try { handle.setPointerCapture(pid); } catch (_) {}
+        if (navigator.vibrate) navigator.vibrate(15);
+      }, 350);
       const onMove = ev => {
         if (!dragging){
           if (Math.abs(ev.clientX - startX) > 10 || Math.abs(ev.clientY - startY) > 10) finish();
           return;
         }
         ev.preventDefault();
-        const y = ev.clientY;
-        for (const other of block.parentNode.querySelectorAll(".brokerBlock")){
-          if (other === block) continue;
-          const r = other.getBoundingClientRect(), mid = r.top + r.height / 2;
-          const blockIsAfter = !!(other.compareDocumentPosition(block) & Node.DOCUMENT_POSITION_FOLLOWING);
-          if (y < mid && blockIsAfter){ other.parentNode.insertBefore(block, other); break; }
-          if (y > mid && !blockIsAfter){ other.parentNode.insertBefore(block, other.nextSibling); break; }
-        }
-      };
-      const onUp = () => {
-        clearTimeout(timer);
-        if (dragging){
-          block.classList.remove("dragging");
-          const order = [...block.parentNode.querySelectorAll(".brokerBlock")].map(el => el.dataset.broker);
-          brokerOrder = order;
-          localStorage.setItem("brokerOrder", JSON.stringify(order));
-        }
-        finish();
+        const dy = ev.clientY - startY;
+        block.style.transform = `translateY(${dy}px)`;
+        const center = rects[idx].top + rects[idx].height / 2 + dy;
+        newIdx = 0;
+        blocks.forEach((el, j) => { if (j !== idx && rects[j].top + rects[j].height / 2 < center) newIdx++; });
+        const h = rects[idx].height + gap;
+        blocks.forEach((el, j) => {
+          if (j === idx) return;
+          let s = 0;
+          if (idx < newIdx && j > idx && j <= newIdx) s = -h;
+          if (idx > newIdx && j >= newIdx && j < idx) s = h;
+          el.style.transform = s ? `translateY(${s}px)` : "";
+        });
       };
       const finish = () => {
         clearTimeout(timer);
+        handle.removeEventListener("pointermove", onMove);
+        handle.removeEventListener("pointerup", onUp);
+        handle.removeEventListener("pointercancel", onUp);
         document.removeEventListener("pointermove", onMove);
-        document.removeEventListener("pointerup", onUp);
-        document.removeEventListener("pointercancel", onUp);
       };
+      const onUp = () => {
+        const was = dragging;
+        finish();
+        if (!was) return;
+        blocks.forEach(el => { el.style.transform = ""; el.style.transition = ""; });
+        block.classList.remove("dragging");
+        if (newIdx !== idx){
+          const names = blocks.map(el => el.dataset.broker);
+          const [m] = names.splice(idx, 1); names.splice(newIdx, 0, m);
+          /* 画面に出ていない会社の並びは保ったまま、並べ替えた順を保存する（記録画面もこの順に揃う） */
+          const rest = getBrokerOrder().filter(n => !names.includes(n));
+          brokerOrder = [...names, ...rest];
+          localStorage.setItem("brokerOrder", JSON.stringify(brokerOrder));
+        }
+        render();
+      };
+      handle.addEventListener("pointermove", onMove);
+      handle.addEventListener("pointerup", onUp);
+      handle.addEventListener("pointercancel", onUp);
       document.addEventListener("pointermove", onMove);
-      document.addEventListener("pointerup", onUp);
-      document.addEventListener("pointercancel", onUp);
     };
   });
 }
