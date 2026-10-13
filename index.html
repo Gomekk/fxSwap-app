@@ -146,11 +146,18 @@ section h2 .act{font-family:var(--sans);font-size:13px;font-weight:500}
 .goalhead input{width:120px;padding:6px 8px;border:1px solid var(--line);border-radius:6px;background:var(--card);font-size:13px;text-align:right}
 .goalbar{height:8px;border-radius:4px;background:var(--paper-2);overflow:hidden;margin-bottom:4px}
 .goalfill{height:100%;background:var(--violet)}
+.goalrow.achieved{border:2px solid var(--gain);background:color-mix(in srgb, var(--gain) 7%, var(--card))}
+.goalrow.achieved .goalfill{background:var(--gain)}
+.goalrow .ok{display:inline-block;margin-left:6px;font-size:11px;font-weight:700;color:var(--gain)}
 .goalstat{font-size:12.5px;color:var(--ink-2)}
 
 table.sum{width:100%;border-collapse:collapse;font-size:13px}
 .tablebox{overflow-x:auto;border:1px solid var(--line);border-radius:4px;background:var(--card)}
 table.sum th,table.sum td{padding:8px 10px;text-align:right;white-space:nowrap;border-bottom:1px solid var(--line)}
+table.sum.hold .lotsub{font-size:10.5px;color:var(--ink-3);font-weight:400}
+table.sum.hold th,table.sum.hold td{padding:8px 4px;font-size:12.5px}
+table.sum.hold th:first-child,table.sum.hold td:first-child{padding-left:10px}
+table.sum.hold th:last-child,table.sum.hold td:last-child{padding-right:10px}
 table.sum.tight th,table.sum.tight td{padding:6px 2px;font-size:12px}
 table.sum.tight th:first-child,table.sum.tight td:first-child{font-size:12.5px;padding-left:10px;padding-right:1px}
 table.sum.tight input:disabled{opacity:1;color:var(--ink);-webkit-text-fill-color:var(--ink);background:var(--card)}
@@ -863,7 +870,7 @@ function viewHold(){
   ps.forEach(p => { gAll[p.pair] ||= {units:0, lots:0, buy:0, sell:0, swap:0}; gAll[p.pair].units += num(p.units); gAll[p.pair].lots += num(p.lots); gAll[p.pair][p.side === "sell" ? "sell" : "buy"]++; gAll[p.pair].swap += posDailySwap(p); });
   const totalDaily = ps.reduce((s, p) => s + posDailySwap(p), 0);
   html += `<div class="broker"><span>全証券会社合計</span><span>1日 ${signed(totalDaily)}</span></div>
-    <div class="tablebox"><table class="sum" style="width:100%"><thead><tr><th style="text-align:left">通貨ペア</th><th>数量</th><th>スワップ</th><th>内訳</th></tr></thead><tbody>`;
+    <div class="tablebox"><table class="sum hold" style="width:100%"><thead><tr><th style="text-align:left">通貨ペア</th><th>数量</th><th>スワップ</th><th>内訳</th></tr></thead><tbody>`;
   Object.entries(gAll).sort((a,c) => a[0].localeCompare(c[0])).forEach(([pair, agg]) => {
     html += `<tr><td style="text-align:left">${esc(pair)}</td><td>${num(agg.units).toLocaleString("ja-JP")}通貨</td><td class="${cls(agg.swap)}">${signed(agg.swap)}</td><td>${agg.buy ? `<span class="tag tag-buy">買${agg.buy}</span>` : ""}${agg.sell ? `<span class="tag tag-sell">売${agg.sell}</span>` : ""}</td></tr>`;
   });
@@ -881,9 +888,9 @@ function viewHold(){
     if (view === "summary"){
       const g = {};
       list.forEach(p => { g[p.pair] ||= {units:0, lots:0, buy:0, sell:0, swap:0}; g[p.pair].units += num(p.units); g[p.pair].lots += num(p.lots); g[p.pair][p.side === "sell" ? "sell" : "buy"]++; g[p.pair].swap += posDailySwap(p); });
-      html += `<div class="tablebox"><table class="sum" style="width:100%"><thead><tr><th style="text-align:left">通貨ペア</th><th>数量</th><th>スワップ</th><th>内訳</th></tr></thead><tbody>`;
+      html += `<div class="tablebox"><table class="sum hold" style="width:100%"><thead><tr><th style="text-align:left">通貨ペア</th><th>数量</th><th>スワップ</th><th>内訳</th></tr></thead><tbody>`;
       Object.entries(g).sort((a,c) => a[0].localeCompare(c[0])).forEach(([pair, agg]) => {
-        html += `<tr><td style="text-align:left">${esc(pair)}</td><td>${num(agg.units).toLocaleString("ja-JP")}通貨(${agg.lots}lot)</td><td class="${cls(agg.swap)}">${signed(agg.swap)}</td><td>${agg.buy ? `<span class="tag tag-buy">買${agg.buy}</span>` : ""}${agg.sell ? `<span class="tag tag-sell">売${agg.sell}</span>` : ""}</td></tr>`;
+        html += `<tr><td style="text-align:left">${esc(pair)}</td><td>${num(agg.units).toLocaleString("ja-JP")}通貨${agg.lots ? `<br><span class="lotsub">(${agg.lots}lot)</span>` : ""}</td><td class="${cls(agg.swap)}">${signed(agg.swap)}</td><td>${agg.buy ? `<span class="tag tag-buy">買${agg.buy}</span>` : ""}${agg.sell ? `<span class="tag tag-sell">売${agg.sell}</span>` : ""}</td></tr>`;
       });
       html += `</tbody></table></div>`;
     } else {
@@ -973,8 +980,9 @@ function viewGoals(){
   const nm = nearestMilestone();
   const row = (label, actual, target, extra = "") => {
     const pct = target ? Math.min(100, Math.round(actual / target * 100)) : null;
-    return `<div class="goalrow">
-      <div class="goalhead"><span>${label}</span><span style="font-family:var(--serif);font-weight:700">${target ? yen(target) : "—"}</span></div>
+    const done = !!target && actual >= target;
+    return `<div class="goalrow${done ? " achieved" : ""}">
+      <div class="goalhead"><span>${label}${done ? `<span class="ok">✓ 達成</span>` : ""}</span><span style="font-family:var(--serif);font-weight:700">${target ? yen(target) : "—"}</span></div>
       <div class="goalbar"><div class="goalfill" style="width:${pct ?? 0}%"></div></div>
       <div class="goalstat">実績 ${yen(actual)}${pct != null ? `（${pct}%）` : ""}</div>${extra}
     </div>`;
@@ -989,8 +997,8 @@ function viewGoals(){
     /* 月間・年間は1日あたりに日数を掛けただけなので、バーでは評価せず、1日あたりの枠内に参考として載せる */
     const ref = `<div style="margin-top:10px;padding-top:8px;border-top:1px dashed var(--line);font-size:12px;color:var(--ink-3)">
       <div style="font-weight:600;margin-bottom:3px">参考（1日あたり×日数）</div>
-      <div style="display:flex;justify-content:space-between"><span>月間（×30）</span><span>実績 ${yen(dailyNow*30)}${dTarget ? `　/　目標 ${yen(dTarget*30)}` : ""}</span></div>
-      <div style="display:flex;justify-content:space-between"><span>年間（×365）</span><span>実績 ${yen(dailyNow*365)}${dTarget ? `　/　目標 ${yen(dTarget*365)}` : ""}</span></div></div>`;
+      <div style="display:flex;justify-content:space-between;gap:8px"><span style="white-space:nowrap">月間（×30）</span><span>実績 ${yen(dailyNow*30)}${dTarget ? `　/　目標 ${yen(dTarget*30)}` : ""}</span></div>
+      <div style="display:flex;justify-content:space-between;gap:8px"><span style="white-space:nowrap">年間（×365）</span><span>実績 ${yen(dailyNow*365)}${dTarget ? `　/　目標 ${yen(dTarget*365)}` : ""}</span></div></div>`;
     html += row("1日あたりスワップ", dailyNow, dTarget, ref);
   }
   html += `</section>`;
@@ -1494,7 +1502,7 @@ function openCash(c){
   }, () => removeDoc("cash", c.id));
 }
 
-document.querySelectorAll("nav.tabs button").forEach(b => b.onclick = () => { tab = b.dataset.tab; render(); window.scrollTo(0,0); });
+document.querySelectorAll("nav.tabs button").forEach(b => b.onclick = () => { tab = b.dataset.tab; settingsView = null; goalsView = null; weeksExpanded = false; render(); window.scrollTo(0,0); });
 let rw = window.innerWidth;
 window.addEventListener("resize", () => { if ((rw < 600) !== (window.innerWidth < 600)){ rw = window.innerWidth; render(); } });
 document.addEventListener("keydown", e => {
