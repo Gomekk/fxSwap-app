@@ -182,7 +182,9 @@ nav.tabs button[aria-selected="true"]{color:var(--ink);font-weight:700;border-to
 .seg button[aria-pressed="true"]{background:var(--ink);color:var(--paper);font-weight:700}
 .calc{margin:6px 0 16px;padding:12px 14px;background:var(--paper-2);border-radius:6px;font-size:14px;display:grid;grid-template-columns:1fr auto;gap:4px 12px}
 .calc b{font-family:var(--serif);font-size:17px}
-.brokerRow{display:grid;grid-template-columns:1fr 1.3fr auto;gap:8px;align-items:center;margin-bottom:8px}
+.brokerRow{display:grid;grid-template-columns:1fr 1.2fr;gap:8px;align-items:center;margin-bottom:8px}
+.brokerRow .bname{font-size:11.5px;white-space:nowrap;overflow:hidden;letter-spacing:-.02em}
+.f input:disabled{color:var(--ink);opacity:1;-webkit-text-fill-color:currentColor;background:var(--paper-2)}
 .brokerRow input{padding:9px 10px;border:1px solid var(--line);border-radius:6px;background:var(--card);font-size:16px;width:100%}
 .x{background:none;border:0;color:var(--ink-3);font-size:18px;padding:4px 6px}
 .actions{display:flex;gap:10px;justify-content:space-between;margin-top:18px}
@@ -196,7 +198,7 @@ nav.tabs button[aria-selected="true"]{color:var(--ink);font-weight:700;border-to
 </head>
 <body>
 <div class="wrap">
-  <header class="top"><h1>FXスワップ管理</h1><span class="status"><span id="status"></span></span></header>
+  <header class="top"><h1>FXスワップ管理</h1><span class="status"><span id="status"></span> <button class="linkbtn" id="logout" hidden>ログアウト</button></span></header>
   <main id="view"></main>
 </div>
 <nav class="tabs" id="tabs" hidden aria-label="画面切り替え"><div class="in" role="tablist">
@@ -210,9 +212,9 @@ nav.tabs button[aria-selected="true"]{color:var(--ink);font-weight:700;border-to
 <div class="sheet" id="sheet" role="dialog" aria-modal="true"><div class="in" id="sheetIn"></div></div>
 <div class="toast" id="toast" role="status"></div>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <script>
 (() => {
-/* 以前のSupabase（引き継ぎ機能でだけ使う） */
 const SUPABASE_URL = "https://mspzgfkommmuucjvdvbm.supabase.co";
 const SUPABASE_KEY = "sb_publishable_sj2rETV0MdsP1hA56C70kQ_F5eS1Via";
 
@@ -227,7 +229,7 @@ const pairsFor = broker => {
 };
 const COLS = ["weeks","positions","closed","cash","settings","goals","milestones","swapHistory","monthlySwap"];
 const state = {weeks:[],positions:[],closed:[],cash:[],settings:[],goals:[],milestones:[],swapHistory:[],monthlySwap:[]};
-let ready = false, tab = "trend";
+let ready = false, authKnown = false, session = null, tab = "trend";
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -269,44 +271,71 @@ const swapSideOf = (broker, pair) => { const s = settingFor(broker, pair); retur
 const posDailySwap = p => { const sp = swapPointOf(p.broker, p.pair); if (sp == null) return 0; const dir = (p.side === "sell" ? "sell" : "buy") === swapSideOf(p.broker, p.pair) ? 1 : -1; return sp * (num(p.units) / 10000) * dir; };
 const inputStyle = (w, align="right") => `width:100%;max-width:${w}px;padding:6px 8px;border:1px solid var(--line);border-radius:6px;background:var(--card);font-size:14px;text-align:${align}`;
 
-/* ---------- データ保存（この端末のlocalStorageに保存） ---------- */
-const STORE_KEY = "fxswap:data", META_KEY = "fxswap:meta";
-const meta = (() => { try { return JSON.parse(localStorage.getItem(META_KEY) || "{}") || {}; } catch (e) { return {}; } })();
-const saveMeta = () => { try { localStorage.setItem(META_KEY, JSON.stringify(meta)); } catch (e) {} };
-function persist(){
-  try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); return true; }
-  catch (e) { toast("端末に保存できませんでした：" + ((e && e.message) || e), 4000); return false; }
-}
-function loadLocal(){
-  try {
-    const d = JSON.parse(localStorage.getItem(STORE_KEY) || "null");
-    if (d) COLS.forEach(c => state[c] = Array.isArray(d[c]) ? d[c] : []);
-  } catch (e) { $("#status").textContent = "保存データを読み込めませんでした"; }
-}
-async function load(col){ /* データは常にメモリ上にあるので、読み直しは不要 */ }
-/* 条件に合う行があれば上書き、なければ追加（Supabaseのupsertと同じ動き） */
-const upsertBy = (col, match, data) => {
-  const cur = state[col].find(match);
-  if (cur) Object.assign(cur, data); else state[col].push({id: uid(), ...data});
+/* Supabase側の一時的な不具合（PGRST303 "JWT issued at future"）は、少し待つと通るため自動で再試行する */
+const RETRY_MS = 1000;
+const retryFetch = async (url, opts) => {
+  let res;
+  for (let i = 0; i < 4; i++){
+    res = await fetch(url, opts);
+    if (res.status !== 401) return res;
+    const body = await res.clone().text().catch(() => "");
+    if (!/PGRST303|JWT issued at future/i.test(body)) return res;
+    if (i < 3) await new Promise(r => setTimeout(r, RETRY_MS * (i + 1)));
+  }
+  return res;
 };
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY, { global: { fetch: retryFetch } });
+const TABLE = {weeks:"weeks", positions:"positions", closed:"closed_positions", cash:"cash_flows", settings:"settings", goals:"goals", milestones:"goal_milestones", swapHistory:"swap_history", monthlySwap:"monthly_swap"};
+const NUMS = new Set(["equity","principal","daily","units","swap","margin","fxPl","swapTotal","amount","lots","lotSize","minLot","maxPosition","monthlyTarget","yearlyTarget","principalTarget","swapPoint","marginRequired","targetAmount","targetEquity"]);
+const toSnake = k => k.replace(/[A-Z]/g, m => "_" + m.toLowerCase());
+const toCamel = k => k.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
+const fromRow = r => { const o = {}; for (const k in r){ const c = toCamel(k); o[c] = NUMS.has(c) && r[k] != null ? Number(r[k]) : r[k]; } return o; };
+const toRow = d => { const o = {}; for (const k in d){ if (k === "id") continue; let v = d[k]; if (v === "" && /date$/i.test(k)) v = null; o[toSnake(k)] = v; } return o; };
+
+async function load(col){
+  const { data, error } = await sb.from(TABLE[col]).select("*");
+  if (error){ $("#status").textContent = "読み込みエラー：" + error.message + (/JWT issued at future|PGRST303/i.test(error.message) ? "（Supabase側の一時的な不具合です。少し待ってから開き直してください）" : ""); return; }
+  state[col] = data.map(fromRow);
+}
+async function loadAll(){
+  $("#status").textContent = "読み込み中…";
+  await Promise.all(COLS.map(load));
+  ready = true;
+  if ($("#status").textContent === "読み込み中…") $("#status").textContent = "";
+  render();
+  autoFetchOncePerDay();
+}
 async function saveSetting(broker, pair, patch){
-  upsertBy("settings", x => x.broker === broker && x.pair === pair, {broker, pair, ...patch});
-  if (!persist()) return false;
+  const row = toRow({broker, pair, ...patch}); row.user_id = session.user.id;
+  const { error } = await sb.from("settings").upsert(row, { onConflict: "user_id,broker,pair" });
+  if (error){ toast("保存できませんでした：" + error.message); return false; }
+  const s = state.settings.find(x => x.broker === broker && x.pair === pair);
+  if (s) Object.assign(s, patch); else state.settings.push({id:null, broker, pair, ...patch});
   toast("保存しました");
   return true;
 }
 async function saveSettingsBatch(broker, items){
-  items.forEach(it => upsertBy("settings", x => x.broker === broker && x.pair === it.pair, {broker, pair: it.pair, swapPoint: it.swapPoint, swapSide: it.swapSide}));
-  return persist();
+  const rows = items.map(it => { const r = toRow({broker, pair: it.pair, swapPoint: it.swapPoint, swapSide: it.swapSide}); r.user_id = session.user.id; return r; });
+  const { error } = await sb.from("settings").upsert(rows, { onConflict: "user_id,broker,pair" });
+  if (error){ toast("保存できませんでした：" + error.message, 4000); return false; }
+  items.forEach(it => {
+    const patch = {swapPoint: it.swapPoint, swapSide: it.swapSide};
+    const cur = state.settings.find(x => x.broker === broker && x.pair === it.pair);
+    if (cur) Object.assign(cur, patch); else state.settings.push({id:null, broker, pair: it.pair, ...patch});
+  });
+  return true;
 }
 /* 月間累計スワップ実績の手動入力（証券会社ごとに1件、月+証券会社で一意） */
 async function saveMonthlySwapBatch(month, rows){
-  rows.forEach(r => upsertBy("monthlySwap", x => x.month === month && x.broker === r.broker, {month, broker: r.broker, amount: r.amount}));
-  return persist();
+  const dbRows = rows.map(r => { const row = toRow({month, broker: r.broker, amount: r.amount}); row.user_id = session.user.id; return row; });
+  const { error } = await sb.from("monthly_swap").upsert(dbRows, { onConflict: "user_id,month,broker" });
+  if (error){ toast("保存できませんでした：" + error.message, 4000); return false; }
+  await load("monthlySwap");
+  return true;
 }
 async function removeMonthlySwapMonth(month){
-  state.monthlySwap = state.monthlySwap.filter(r => r.month !== month);
-  persist(); render();
+  const ids = state.monthlySwap.filter(r => r.month === month).map(r => r.id).filter(Boolean);
+  for (const id of ids) await removeDoc("monthlySwap", id);
 }
 function openMonthlySwap(month){
   const entries = month ? state.monthlySwap.filter(r => r.month === month) : [];
@@ -326,200 +355,103 @@ function openMonthlySwap(month){
     closeSheet(); render(); toast("記録しました");
   }, () => removeMonthlySwapMonth(month));
 }
-/* 自動取得：GitHub Actionsが毎日作る swap.json を読み、取り扱いペア（基本情報の取引単位か建玉上限が入力済み）だけを反映する */
+/* 自動取得：取り扱いペア（基本情報の取引単位か建玉上限が入力済み）だけを、Edge Functionから取得して保存 */
 const FETCHABLE = ["外為どっとコム", "GMOクリック証券", "みんなのFX", "トライオートFX", "セントラル短資"];
 let swapAsOf = JSON.parse(localStorage.getItem("swapAsOf") || "{}"), swapFetching = false;
 const isHandled = (b, pr) => { const c = settingFor(b, pr); return !!(c && (num(c.lotSize) > 0 || num(c.maxPosition) > 0)); };
 const weekSunday = dateStr => { const d = new Date(dateStr + "T00:00:00"); d.setDate(d.getDate() - d.getDay()); return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0"); };
-const fmtStamp = iso => { const d = new Date(iso); return isNaN(d) ? "" : `${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`; };
 async function archiveSwapHistory(broker, results){
   if (!results.length) return;
   const date = weekSunday(today());
-  results.forEach(r => upsertBy("swapHistory", h => h.date === date && h.broker === broker && h.pair === r.pair, {date, broker, pair: r.pair, swapPoint: r.swapPer10k}));
-  persist();
+  const rows = results.map(r => { const row = toRow({date, broker, pair: r.pair, swapPoint: r.swapPer10k}); row.user_id = session.user.id; return row; });
+  const { error } = await sb.from("swap_history").upsert(rows, { onConflict: "user_id,date,broker,pair" });
+  if (error) return;
+  results.forEach(r => {
+    const cur = state.swapHistory.find(h => h.date === date && h.broker === broker && h.pair === r.pair);
+    if (cur) cur.swapPoint = r.swapPer10k; else state.swapHistory.push({id:null, date, broker, pair: r.pair, swapPoint: r.swapPer10k});
+  });
 }
 async function fetchSwapAuto(silent){
   if (swapFetching) return;
   swapFetching = true; if (!silent) render();
   const notes = [];
   try {
-    const res = await fetch("./swap.json?t=" + Date.now(), { cache: "no-store" });
-    if (!res.ok) throw new Error(res.status === 404 ? "swap.jsonがまだありません（GitHub Actionsが一度も動いていない可能性があります）" : "HTTP " + res.status);
-    const all = await res.json();
     for (const b of FETCHABLE){
       const pairs = pairsFor(b).filter(pr => isHandled(b, pr));
       if (!pairs.length){ if (!silent) notes.push(`${b}：基本情報に取り扱いペア（取引単位か建玉上限）がありません`); continue; }
-      const data = all.brokers && all.brokers[b];
-      if (!data || data.error){ notes.push(`${b}：${(data && data.error) || "取得データがありません"}`); continue; }
-      const results = (data.results || []).filter(r => pairs.includes(r.pair));
-      const items = results.map(r => ({pair: r.pair, swapPoint: r.swapPer10k, swapSide: r.side}));
+      const { data, error } = await sb.functions.invoke("fetch-swap", { body: { broker: b, pairs } });
+      if (error || !data || data.error){ notes.push(`${b}：${(data && data.error) || (error && error.message) || "取得に失敗しました"}`); continue; }
+      const items = (data.results || []).map(r => ({pair: r.pair, swapPoint: r.swapPer10k, swapSide: r.side}));
       if (items.length && await saveSettingsBatch(b, items)){
-        swapAsOf[b] = results.map(r => r.date).sort().slice(-1)[0];
+        swapAsOf[b] = items.length ? data.results.map(r => r.date).sort().slice(-1)[0] : null;
         localStorage.setItem("swapAsOf", JSON.stringify(swapAsOf));
-        await archiveSwapHistory(b, results);
+        await archiveSwapHistory(b, data.results);
         if (!silent) notes.push(`${b}：${items.length}件を更新（${fmtDate(swapAsOf[b])}分）`);
       }
-      const skipped = (data.skipped || []).filter(x => pairs.includes(x.pair));
-      if (!silent && skipped.length) notes.push(`${b}：取得できなかったペア ${skipped.map(x => x.pair).join("、")}`);
+      if (!silent && (data.skipped || []).length) notes.push(`${b}：取得できなかったペア ${data.skipped.map(x => x.pair).join("、")}`);
     }
-    if (!silent && all.updatedAt) notes.push(`（データ作成 ${fmtStamp(all.updatedAt)}）`);
   } catch (e) {
     notes.push("取得に失敗しました：" + ((e && e.message) || e));
   } finally {
     swapFetching = false; render(); if (notes.length) toast(notes.join("\n"), 6000);
   }
 }
-/* アプリを開くたびに（1時間に1回まで）自動でスワップを最新化する（通知は出さない。失敗時だけ表示） */
+/* アプリを開くたびに、1日1回だけ自動でスワップを最新化する（通知は出さない。失敗時だけ表示） */
 function autoFetchOncePerDay(){
   if (swapMarginMode !== "auto") return;
-  const key = "swapAutoFetchAt", last = Number(localStorage.getItem(key) || 0);
-  if (Date.now() - last < 3600e3) return;
-  localStorage.setItem(key, String(Date.now()));
+  const key = "swapAutoFetchDate";
+  if (localStorage.getItem(key) === today()) return;
+  localStorage.setItem(key, today());
   fetchSwapAuto(true);
 }
 async function save(col, id, data){
-  if (id){ const cur = state[col].find(x => x.id === id); if (cur) Object.assign(cur, data); else state[col].push({id, ...data}); }
-  else if (col === "weeks") upsertBy("weeks", x => x.date === data.date, data);
-  else if (col === "settings") upsertBy("settings", x => x.broker === data.broker && x.pair === data.pair, data);
-  else if (col === "goals") upsertBy("goals", () => true, data);
-  else state[col].push({id: uid(), ...data});
-  if (!persist()) return false;
-  render(); return true;
+  const row = toRow(data); row.user_id = session.user.id;
+  let q;
+  if (col === "weeks" && !id) q = sb.from("weeks").upsert(row, { onConflict: "user_id,date" });
+  else if (col === "settings" && !id) q = sb.from("settings").upsert(row, { onConflict: "user_id,broker,pair" });
+  else if (col === "goals" && !id) q = sb.from("goals").upsert(row, { onConflict: "user_id" });
+  else if (id) q = sb.from(TABLE[col]).update(row).eq("id", id);
+  else q = sb.from(TABLE[col]).insert(row);
+  const { error } = await q;
+  if (error){ toast("保存できませんでした：" + error.message); return false; }
+  await load(col); render(); return true;
 }
 async function removeDoc(col, id){
-  state[col] = state[col].filter(x => x.id !== id);
-  persist(); render();
+  const { error } = await sb.from(TABLE[col]).delete().eq("id", id);
+  if (error){ toast("削除できませんでした：" + error.message); return; }
+  await load(col); render();
+}
+function boot(){
+  sb.auth.onAuthStateChange((event, s) => {
+    const before = session && session.user.id;
+    session = s; authKnown = true;
+    $("#logout").hidden = !s; $("#tabs").hidden = !s;
+    if (!s){ ready = false; COLS.forEach(c => state[c] = []); render(); }
+    else if (before !== s.user.id){ render(); setTimeout(loadAll, 0); }
+  });
+  $("#logout").onclick = async () => { if (confirm("ログアウトしますか？")) await sb.auth.signOut(); };
+  document.addEventListener("visibilitychange", () => { if (!document.hidden && session && ready) loadAll(); });
 }
 
-/* ---------- バックアップ（書き出し・読み込み） ---------- */
-const BACKUP_DAYS = 14;
-const backupStamp = () => meta.lastBackup ? fmtDate(meta.lastBackup) : "まだありません";
-const backupDue = () => state.weeks.length > 0 && (!meta.lastBackup || daysBetween(meta.lastBackup, today()) >= BACKUP_DAYS);
-const backupBanner = () => !backupDue() ? "" : `<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 14px;margin:0 0 18px;border:1px solid var(--gold);border-radius:4px;background:var(--card)"><p style="margin:0;font-size:13px">${meta.lastBackup ? `最後のバックアップから${daysBetween(meta.lastBackup, today())}日たっています` : "まだバックアップがありません"}</p><button class="btn small" data-act="backup">書き出す</button></div>`;
-async function exportBackup(){
-  const name = `fxswap-backup-${today()}.json`;
-  const payload = {app: "fxswap", version: 1, exportedAt: today(), data: Object.fromEntries(COLS.map(c => [c, state[c]])), extras: {brokerOrder: localStorage.getItem("brokerOrder"), swapAsOf}};
-  const blob = new Blob([JSON.stringify(payload)], {type: "application/json"});
-  try {
-    const file = new File([blob], name, {type: "application/json"});
-    if (navigator.canShare && navigator.canShare({files: [file]})) await navigator.share({files: [file]});
-    else {
-      const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name;
-      document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 10000);
-    }
-  } catch (e) {
-    if (e && e.name === "AbortError"){ toast("書き出しをやめました"); return false; }
-    toast("書き出せませんでした：" + ((e && e.message) || e), 4000); return false;
-  }
-  meta.lastBackup = today(); saveMeta();
-  render(); toast("バックアップを書き出しました");
-  return true;
-}
-function offerBackup(){
-  openSheet("記録しました", `<p style="margin:4px 0 0;font-size:14px">続けてバックアップを書き出しておきますか？</p>
-    <p class="hint">最終バックアップ：${backupStamp()}</p>
-    <div class="actions"><div class="right"><button class="btn ghost" data-close2>あとで</button><button class="btn" data-go>書き出す</button></div></div>`);
-  const s = $("#sheetIn");
-  s.querySelector("[data-close2]").onclick = closeSheet;
-  s.querySelector("[data-go]").onclick = () => { closeSheet(); exportBackup(); };
-}
-function pickBackupFile(){
-  const inp = document.createElement("input");
-  inp.type = "file"; inp.accept = ".json,application/json"; inp.hidden = true;
-  document.body.appendChild(inp);
-  inp.onchange = async () => {
-    const f = inp.files && inp.files[0]; inp.remove();
-    if (!f) return;
-    let d; try { d = JSON.parse(await f.text()); } catch (e) { toast("読み込めませんでした（ファイルの形式が違います）", 4000); return; }
-    importBackup(d);
-  };
-  inp.click();
-}
-function importBackup(d){
-  if (!d || d.app !== "fxswap" || !d.data){ toast("FXスワップ管理のバックアップファイルではありません", 4000); return; }
-  const n = (d.data.weeks || []).length;
-  if (!confirm(`${d.exportedAt ? fmtDate(d.exportedAt) + " の" : ""}バックアップ（週の記録${n}件）を読み込みます。\n今この端末にあるデータは置き換えられます。よろしいですか？`)) return;
-  COLS.forEach(c => state[c] = Array.isArray(d.data[c]) ? d.data[c] : []);
-  const ex = d.extras || {};
-  if (ex.brokerOrder){ localStorage.setItem("brokerOrder", ex.brokerOrder); brokerOrder = null; }
-  if (ex.swapAsOf){ swapAsOf = ex.swapAsOf; localStorage.setItem("swapAsOf", JSON.stringify(swapAsOf)); }
-  if (!persist()) return;
-  render(); toast(`読み込みました（週の記録${n}件）`, 3000);
-}
-
-/* ---------- Supabaseからの引き継ぎ（最初の1回だけ使う） ---------- */
-/* Supabase側の一時的な不具合（PGRST303 "JWT issued at future"）は、少し待つと通るため自動で再試行する */
-const RETRY_MS = 1000;
-const retryFetch = async (url, opts) => {
-  let res;
-  for (let i = 0; i < 4; i++){
-    res = await fetch(url, opts);
-    if (res.status !== 401) return res;
-    const body = await res.clone().text().catch(() => "");
-    if (!/PGRST303|JWT issued at future/i.test(body)) return res;
-    if (i < 3) await new Promise(r => setTimeout(r, RETRY_MS * (i + 1)));
-  }
-  return res;
-};
-const TABLE = {weeks:"weeks", positions:"positions", closed:"closed_positions", cash:"cash_flows", settings:"settings", goals:"goals", milestones:"goal_milestones", swapHistory:"swap_history", monthlySwap:"monthly_swap"};
-const NUMS = new Set(["equity","principal","daily","units","swap","margin","fxPl","swapTotal","amount","lots","lotSize","minLot","maxPosition","monthlyTarget","yearlyTarget","principalTarget","swapPoint","marginRequired","targetAmount","targetEquity"]);
-const toCamel = k => k.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
-const fromRow = r => { const o = {}; for (const k in r){ const c = toCamel(k); o[c] = NUMS.has(c) && r[k] != null ? Number(r[k]) : r[k]; } return o; };
-const loadSupabaseLib = () => new Promise((res, rej) => {
-  if (window.supabase) return res();
-  const s = document.createElement("script");
-  s.src = "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js";
-  s.onload = () => res(); s.onerror = () => rej(new Error("Supabaseの部品を読み込めませんでした"));
-  document.head.appendChild(s);
-});
-function openMigrate(){
-  openSheet("Supabaseから引き継ぐ", `
-    <p class="hint" style="margin-top:0">これまでSupabaseに保存していた記録を、この端末に取り込みます。最初の1回だけ使ってください。</p>
-    <form id="loginForm">
+function viewLogin(){
+  return `<div class="cert">${rosette()}<div class="inner">
+    <p class="cap">ログイン</p>
+    <form id="loginForm" style="margin-top:12px">
       <label class="f"><span>メールアドレス</span><input name="email" type="email" autocomplete="username" required></label>
       <label class="f"><span>パスワード</span><input name="password" type="password" autocomplete="current-password" required></label>
       <p class="hint" id="loginMsg"></p>
-      <div class="actions"><div class="right"><button type="button" class="btn ghost" data-close2>やめる</button><button class="btn" type="submit">取り込む</button></div></div>
-    </form>`);
-  const f = $("#loginForm"), msg = $("#loginMsg"), btn = f.querySelector('[type="submit"]');
-  f.querySelector("[data-close2]").onclick = closeSheet;
+      <button class="btn" type="submit">ログインする</button>
+    </form></div></div>`;
+}
+function bindLogin(){
+  const f = $("#loginForm");
   f.onsubmit = async e => {
     e.preventDefault();
-    btn.disabled = true; msg.textContent = "接続中…";
-    try {
-      await loadSupabaseLib();
-      const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { persistSession: false, autoRefreshToken: false }, global: { fetch: retryFetch } });
-      const { error } = await sb.auth.signInWithPassword({ email: f.email.value.trim(), password: f.password.value });
-      if (error) throw new Error(/invalid/i.test(error.message) ? "メールアドレスかパスワードが違います" : error.message);
-      msg.textContent = "読み込み中…";
-      const got = {};
-      for (const c of COLS){
-        const { data, error: e2 } = await sb.from(TABLE[c]).select("*");
-        if (e2) throw new Error(`${TABLE[c]}：${e2.message}`);
-        got[c] = data.map(r => { const o = fromRow(r); delete o.userId; delete o.createdAt; o.id = o.id != null ? String(o.id) : uid(); return o; });
-      }
-      await sb.auth.signOut().catch(() => {});
-      const n = got.weeks.length;
-      if (COLS.some(c => state[c].length) && !confirm(`週の記録${n}件などを取り込みます。\n今この端末にあるデータは置き換えられます。よろしいですか？`)){ msg.textContent = ""; btn.disabled = false; return; }
-      COLS.forEach(c => state[c] = got[c]);
-      if (!persist()) throw new Error("端末に保存できませんでした");
-      meta.migrated = today(); saveMeta();
-      closeSheet(); render(); toast(`取り込みました（週の記録${n}件）`, 3000);
-    } catch (err) {
-      msg.textContent = "取り込めませんでした：" + ((err && err.message) || err);
-      btn.disabled = false;
-    }
+    const btn = f.querySelector("button"); btn.disabled = true; $("#loginMsg").textContent = "確認中…";
+    const { error } = await sb.auth.signInWithPassword({ email: f.email.value.trim(), password: f.password.value });
+    btn.disabled = false;
+    $("#loginMsg").textContent = error ? (/invalid/i.test(error.message) ? "メールアドレスかパスワードが違います" : "ログインできませんでした：" + error.message) : "";
   };
-}
-
-function boot(){
-  loadLocal();
-  ready = true;
-  $("#tabs").hidden = false;
-  if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
-  render();
-  autoFetchOncePerDay();
-  document.addEventListener("visibilitychange", () => { if (!document.hidden && ready) autoFetchOncePerDay(); });
 }
 
 function rosette(){
@@ -544,10 +476,11 @@ function rosette(){
 }
 
 function render(){
-  if (!ready){ $("#view").innerHTML = `<p class="hint" style="padding:40px 0;text-align:center">読み込み中…</p>`; return; }
+  if (!authKnown || (session && !ready)){ $("#view").innerHTML = `<p class="hint" style="padding:40px 0;text-align:center">読み込み中…</p>`; return; }
+  if (!session){ $("#view").innerHTML = viewLogin(); bindLogin(); return; }
   document.querySelectorAll("nav.tabs button").forEach(b => b.setAttribute("aria-selected", b.dataset.tab === tab));
   const v = $("#view");
-  v.innerHTML = tab === "trend" ? backupBanner() + viewTrend() : tab === "hold" ? viewHold() : tab === "closed" ? viewClosed() : tab === "goals" ? viewGoals() : viewSettings();
+  v.innerHTML = tab === "trend" ? viewTrend() : tab === "hold" ? viewHold() : tab === "closed" ? viewClosed() : tab === "goals" ? viewGoals() : viewSettings();
   bindView();
 }
 
@@ -1023,13 +956,11 @@ function viewSettings(){
   if (settingsView === "cash") return viewSettingsCash();
   if (settingsView === "swapmargin") return viewSettingsSwapMargin();
   if (settingsView === "swaptrend") return viewSettingsSwapTrend();
-  if (settingsView === "data") return viewSettingsData();
   return `<section><h2>設定</h2>
     <div class="setgrid">
       <button class="setbtn" data-panel="basic"><span class="t">基本情報</span><span class="d">取引単位・最小Lot数・建玉上限</span></button>
       <button class="setbtn" data-panel="cash"><span class="t">入出金</span><span class="d">入金・出金・キャッシュバックの記録</span></button>
       <button class="setbtn" data-panel="swapmargin"><span class="t">スワップ/証拠金</span><span class="d">通貨ペアごとのスワップと必要証拠金</span></button>
-      <button class="setbtn" data-panel="data"><span class="t">データ・バックアップ</span><span class="d">書き出し・読み込み（最終 ${backupStamp()}）</span></button>
     </div></section>`;
 }
 const BROKER_COLORS = {"外為どっとコム":"var(--violet)","GMOクリック証券":"var(--gold)","みんなのFX":"var(--bar)","トライオートFX":"var(--buy)","セントラル短資":"var(--sell)"};
@@ -1076,20 +1007,6 @@ function swapTrendChart(pair){
   s += `</svg>`;
   const legend = brokers.map(b => `<span><i style="background:${BROKER_COLORS[b]||"var(--ink-2)"}"></i>${esc(b)}</span>`).join("");
   return `<div class="chart"><div class="legend">${legend}</div>${s}</div>`;
-}
-function viewSettingsData(){
-  return `<div class="subhead"><button class="linkbtn" data-back>← 設定</button></div>
-    <h2 style="margin:8px 0 4px">データ・バックアップ</h2>
-    <p class="hint">記録はこの端末（ホーム画面のアプリ）の中にだけ保存されています。機種変更やもしものときのために、週1回の記録のついでに書き出しておきましょう。</p>
-    <div class="broker"><span>バックアップを書き出す</span><span style="font-weight:500;font-size:12px">最終 ${backupStamp()}</span></div>
-    <p class="hint">共有シートで「"ファイル"に保存」→ iCloud Driveを選ぶと、新しいiPhoneからも読み込めます。</p>
-    <button class="btn" data-act="backup">書き出す</button>
-    <div class="broker" style="margin-top:22px"><span>バックアップから読み込む</span></div>
-    <p class="hint">機種変更のときなどに使います。今この端末にあるデータは、ファイルの内容に置き換わります。</p>
-    <button class="btn ghost" data-act="restore">ファイルを選ぶ</button>
-    <div class="broker" style="margin-top:22px"><span>Supabaseから引き継ぐ</span><span style="font-weight:500;font-size:12px">${meta.migrated ? "引き継ぎ済み " + fmtDate(meta.migrated) : ""}</span></div>
-    <p class="hint">以前のSupabaseの記録を取り込みます。最初の1回だけ使ってください。</p>
-    <button class="btn ghost" data-act="migrate">引き継ぐ</button>`;
 }
 function viewSettingsCash(){
   return `<div class="subhead"><button class="linkbtn" data-back>← 設定</button></div>` + viewCash();
@@ -1151,7 +1068,7 @@ function viewSettingsBasic(){
 
 function bindView(){
   const v = $("#view");
-  v.querySelectorAll("[data-act]").forEach(b => b.onclick = () => ({record:()=>openWeek(), addPos:()=>openPos(), addClosed:()=>openClosed(), addCash:()=>openCash(), toggleWeeks:()=>{weeksExpanded = !weeksExpanded; render();}, swapBreakdown:()=>openSwapBreakdown(), addMilestone:()=>openMilestone(), fetchSwap:()=>fetchSwapAuto(), viewPastGoals:()=>{goalsView = "past"; render();}, viewCurrentGoals:()=>{goalsView = null; render();}, addMonthlySwap:()=>openMonthlySwap(null), backup:()=>exportBackup(), restore:()=>pickBackupFile(), migrate:()=>openMigrate()})[b.dataset.act]());
+  v.querySelectorAll("[data-act]").forEach(b => b.onclick = () => ({record:()=>openWeek(), addPos:()=>openPos(), addClosed:()=>openClosed(), addCash:()=>openCash(), toggleWeeks:()=>{weeksExpanded = !weeksExpanded; render();}, swapBreakdown:()=>openSwapBreakdown(), addMilestone:()=>openMilestone(), fetchSwap:()=>fetchSwapAuto(), viewPastGoals:()=>{goalsView = "past"; render();}, viewCurrentGoals:()=>{goalsView = null; render();}, addMonthlySwap:()=>openMonthlySwap(null)})[b.dataset.act]());
   v.querySelectorAll("[data-edit-monthlyswap]").forEach(tr => tr.onclick = () => openMonthlySwap(tr.dataset.editMonthlyswap));
   v.querySelectorAll(".mode-seg button").forEach(b => b.onclick = () => { swapMarginMode = b.dataset.v; render(); });
   const stSel = v.querySelector("#swapTrendSel");
@@ -1244,38 +1161,33 @@ function openWeek(w){
   const principal = w ? w.principal : hasCash ? cashPrincipal() : last ? last.principal : 0;
   const dailyAuto = state.positions.reduce((s2,p) => s2 + posDailySwap(p), 0);
   const daily = w ? w.daily : dailyAuto;
-  let brokers = w && w.brokers ? {...w.brokers} : {};
-  if (!w){
-    const names = [...new Set([...state.positions.map(p=>p.broker).filter(Boolean), ...Object.keys((last&&last.brokers)||{})])];
-    names.forEach(n => brokers[n] = "");
-  }
-  const brokerHtml = () => Object.keys(brokers).map((n,i) => `<div class="brokerRow"><input data-bn="${i}" value="${esc(n)}" aria-label="業者名"><input data-bv="${i}" inputmode="decimal" placeholder="有効評価額" value="${esc(brokers[n])}" aria-label="${esc(n)}の有効評価額"><button class="x" data-bx="${i}" aria-label="削除">×</button></div>`).join("");
+  /* 業者一覧は保有タブの証券会社と同期（編集時は保存済みの業者も残す） */
+  const posNames = [...new Set(state.positions.map(p=>p.broker).filter(Boolean))];
+  const stored = w && w.brokers ? w.brokers : {};
+  const names = orderBrokers([...new Set([...posNames, ...Object.keys(stored)])]);
+  const hasBreakdown = names.length > 0;
+  const brokerHtml = () => names.map((n,i) => `<div class="brokerRow"><span class="bname" title="${esc(n)}">${esc(n)}</span><input class="fld-bv" data-bv="${i}" data-bname="${esc(n)}" inputmode="numeric" placeholder="有効評価額" value="${stored[n]!=null && stored[n]!=="" ? Number(stored[n]).toLocaleString("ja-JP") : ""}" aria-label="${esc(n)}の有効評価額"></div>`).join("");
   openSheet(w ? `${fmtDate(w.date)} の記録` : "今週の記録", `
     <div style="max-width:160px">${field("記録日","date", w ? w.date : today(), "date")}</div>
-    <div class="f"><span>業者ごとの有効評価額（合計が有効評価額になります）</span><div id="bRows">${brokerHtml()}</div><button class="linkbtn" id="bAdd">＋ 業者を追加</button></div>
-    ${field("有効評価額（合計）","equity", w ? w.equity : "", "text", 'inputmode="decimal"')}
-    ${field("1日あたりスワップ","daily", daily, "text", 'inputmode="decimal" style="background:var(--paper-2)"')}
-    ${field("元金" + (!w && hasCash ? "（入出金から自動計算）" : ""),"principal", principal, "text", 'inputmode="decimal" style="background:var(--paper-2)"')}
+    <div class="f"><span>業者ごとの有効評価額（合計が自動計算されます）</span><div id="bRows">${brokerHtml()}</div></div>
+    ${field("有効評価額（合計）","equity", w ? w.equity : "", "text", `inputmode="decimal" ${hasBreakdown?"disabled":""} style="background:var(--paper-2)"`)}
+    ${field("1日あたりスワップ","daily", daily, "text", 'inputmode="decimal" disabled style="background:var(--paper-2)"')}
+    ${field("元金" + (!w && hasCash ? "（入出金から自動計算）" : ""),"principal", principal, "text", 'inputmode="decimal" disabled style="background:var(--paper-2)"')}
     <div class="calc" id="wcalc"></div>
     ${field("メモ","memo", w ? w.memo : "")}
     ${actions(!!w)}`);
   const s = $("#sheetIn");
-  const readBrokers = () => { const o = {}; s.querySelectorAll("[data-bn]").forEach(i => { const n = i.value.trim(); if (n) o[n] = s.querySelector(`[data-bv="${i.dataset.bn}"]`).value.trim(); }); return o; };
-  const redraw = () => { s.querySelector("#bRows").innerHTML = brokerHtml(); bindRows(); };
-  const bindRows = () => {
-    s.querySelectorAll("[data-bx]").forEach(b => b.onclick = () => { brokers = readBrokers(); delete brokers[Object.keys(brokers)[b.dataset.bx]]; redraw(); sumUp(); });
-    s.querySelectorAll("[data-bn]").forEach(i => i.oninput = () => { brokers = readBrokers(); sumUp(); });
-    s.querySelectorAll("[data-bv]").forEach(i => { i.oninput = () => { const d = i.value.replace(/[^\d]/g,""); i.value = d ? Number(d).toLocaleString("ja-JP") : ""; brokers = readBrokers(); sumUp(); }; });
-  };
-  const sumUp = () => { const vals = Object.values(brokers).filter(v => v !== ""); if (vals.length) s.querySelector('[name="equity"]').value = vals.reduce((a,v)=>a+num(v),0).toLocaleString("ja-JP"); calc(); };
+  const readBrokers = () => { const o = {}; s.querySelectorAll("[data-bv]").forEach(i => { o[i.dataset.bname] = i.value.trim(); }); return o; };
+  const sumUp = () => { const vals = Object.values(readBrokers()).filter(v => v !== ""); if (hasBreakdown) s.querySelector('[name="equity"]').value = vals.length ? vals.reduce((a,v)=>a+num(v),0).toLocaleString("ja-JP") : ""; calc(); };
+  const bindRows = () => { s.querySelectorAll("[data-bv]").forEach(i => { i.oninput = () => { const d = i.value.replace(/[^\d]/g,""); i.value = d ? Number(d).toLocaleString("ja-JP") : ""; sumUp(); }; }); };
   const calc = () => {
     const v = formVals(), eq = num(v.equity), pr = num(v.principal), d = num(v.daily);
     const rpl = realizedPLAsOf(v.date);
     s.querySelector("#wcalc").innerHTML = `<span>利益（評価−元金＋実現損益）</span><b class="${eq ? cls(eq-pr+rpl) : ""}">${eq ? signed(eq-pr+rpl) : "—"}</b><span>月間 / 年間スワップ</span><span>${yen(d*30)} / ${yen(d*365)}</span>`;
   };
-  s.querySelector("#bAdd").onclick = () => { brokers = readBrokers(); const n = BROKERS.find(b => !(b in brokers)) || "業者" + (Object.keys(brokers).length+1); brokers[n] = ""; redraw(); };
   s.oninput = calc; bindRows(); calc();
   ["equity","principal","daily"].forEach(n => bindComma(s.querySelector(`[name="${n}"]`)));
+  if (hasBreakdown && !w) sumUp();
   wire(async () => {
     const v = formVals();
     if (!v.date || !num(v.equity)){ toast("記録日と有効評価額を入力してください"); return; }
@@ -1284,7 +1196,7 @@ function openWeek(w){
     state.positions.forEach(p => { const bn = p.broker || "未設定"; brokerSwap[bn] = (brokerSwap[bn] || 0) + posDailySwap(p); });
     const doc = {date:v.date, equity:num(v.equity), principal:num(v.principal), daily:num(v.daily), brokers:bClean, brokerSwap, memo:v.memo};
     if (w && w.date !== v.date) await removeDoc("weeks", w.id);
-    if (await save("weeks", w && w.date === v.date ? w.id : null, doc)){ closeSheet(); if (w) toast("記録しました"); else offerBackup(); }
+    if (await save("weeks", w && w.date === v.date ? w.id : null, doc)){ closeSheet(); toast("記録しました"); }
   }, () => removeDoc("weeks", w.id));
 }
 
@@ -1464,7 +1376,7 @@ document.addEventListener("keydown", e => {
 /* iOS: 日付ピッカーの開閉でビューポートが動いたとき、シートのタップ位置がズレないよう追従させる */
 if (window.visualViewport){
   const vv = window.visualViewport;
-  const reposition = () => { $("#sheet").style.bottom = Math.max(0, window.innerHeight - vv.height - vv.offsetTop) + "px"; };
+  const reposition = () => { const ae = document.activeElement; const isDate = ae && ae.tagName === "INPUT" && ae.type === "date"; $("#sheet").style.bottom = isDate ? Math.max(0, window.innerHeight - vv.height - vv.offsetTop) + "px" : "0px"; };
   vv.addEventListener("resize", reposition);
   vv.addEventListener("scroll", reposition);
 }
