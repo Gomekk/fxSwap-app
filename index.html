@@ -117,6 +117,8 @@ section h2 .act{font-family:var(--sans);font-size:13px;font-weight:500}
 .hi-anchor{position:relative;display:inline-block}
 .hi-anchor .hi-badge{position:absolute;top:-6px;left:-7px;font-size:10px;line-height:1;pointer-events:none}
 .brokerBlock.dragging{background:var(--card);box-shadow:0 6px 18px rgba(0,0,0,.18);z-index:5;transition:none}
+.tablebox input:disabled{opacity:1;color:var(--ink);-webkit-text-fill-color:var(--ink);background:var(--card)}
+.tablebox input:disabled::placeholder{color:var(--ink-3);-webkit-text-fill-color:var(--ink-3)}
 .medal{opacity:1 !important;font-weight:700;color:var(--ink) !important;-webkit-text-fill-color:var(--ink)}
 .medal-1{border:2px solid #C9A227 !important;background:rgba(201,162,39,.10) !important;box-shadow:0 0 0 2px rgba(201,162,39,.25)}
 .medal-2{border:2px solid #A7ADB5 !important;background:rgba(167,173,181,.14) !important;box-shadow:0 0 0 2px rgba(167,173,181,.3)}
@@ -151,7 +153,8 @@ table.sum{width:100%;border-collapse:collapse;font-size:13px}
 table.sum th,table.sum td{padding:8px 10px;text-align:right;white-space:nowrap;border-bottom:1px solid var(--line)}
 table.sum.tight th,table.sum.tight td{padding:6px 2px;font-size:12px}
 table.sum.tight th:first-child,table.sum.tight td:first-child{font-size:12.5px;padding-left:10px;padding-right:1px}
-table.sum.tight input:disabled{opacity:.5;background:var(--paper-2)}
+table.sum.tight input:disabled{opacity:1;color:var(--ink);-webkit-text-fill-color:var(--ink);background:var(--card)}
+table.sum.tight input:disabled::placeholder{color:var(--ink-3);-webkit-text-fill-color:var(--ink-3)}
 tr.tr-unhandled{opacity:.4}
 tr.tr-unhandled input{background:var(--paper-2)}
 .sidebtn{background:none;border:1px solid currentColor;border-radius:3px;font-size:11px;padding:2px 4px;margin-left:3px;cursor:pointer;vertical-align:middle}
@@ -1141,12 +1144,17 @@ function viewSettingsSwapMargin(){
     <h2 style="margin:8px 0 4px">スワップ/証拠金</h2>
     <div style="display:flex;align-items:center;gap:10px;margin:10px 0 12px"><div class="seg mode-seg" style="width:220px;flex:0 0 auto"><button data-v="auto" aria-pressed="${auto}">自動取得</button><button data-v="manual" aria-pressed="${!auto}">手動入力</button></div><button class="btn small" data-act="fetchSwap" ${auto && !swapFetching ? "" : "disabled"}>${swapFetching ? "取得中…" : "記録する"}</button></div>
     <button class="linkbtn" data-panel="swaptrend">過去のスワップ推移 →</button>`;
-  /* 全社・全ペアのスワップ（1万通貨あたり）を比べて、高い順に1〜3位を金・銀・銅の枠にする（同額は同順位） */
-  const swVals = [];
-  BROKERS.forEach(b => pairsFor(b).forEach(pr => { const c = settingFor(b, pr); const v = c ? num(c.swapPoint) : 0; if (isHandled(b, pr) && v > 0) swVals.push(v); }));
-  const topVals = [...new Set(swVals)].sort((a, c) => c - a).slice(0, 3);
-  const medalOf = (b, pr) => { const c = settingFor(b, pr); const v = c ? num(c.swapPoint) : 0; const i = isHandled(b, pr) && v > 0 ? topVals.indexOf(v) : -1; return i < 0 ? "" : " medal medal-" + (i + 1); };
-  html += `<p class="hint" style="margin:6px 0 0"><span class="medal-dot m1"></span>金 <span class="medal-dot m2"></span>銀 <span class="medal-dot m3"></span>銅　各社の全ペアでスワップが高い順</p>`;
+  /* 通貨ペアごとに、各社のスワップ（1万通貨あたり）を比べて、高い順に1〜3位を金・銀・銅の枠にする（同額は同順位。LIGHTも同じ通貨ペアとして比べる） */
+  const baseOf = pr => pr.replace(/\(LIGHT\)$/, "");
+  const valOf = (b, pr) => { const c = settingFor(b, pr); return c && isHandled(b, pr) ? num(c.swapPoint) : 0; };
+  const topByPair = {};
+  PAIRS.forEach(pair => {
+    const vs = [];
+    BROKERS.forEach(b => pairsFor(b).forEach(pr => { if (baseOf(pr) === pair){ const v = valOf(b, pr); if (v > 0) vs.push(v); } }));
+    topByPair[pair] = [...new Set(vs)].sort((x, y) => y - x).slice(0, 3);
+  });
+  const medalOf = (b, pr) => { const v = valOf(b, pr); const i = v > 0 ? (topByPair[baseOf(pr)] || []).indexOf(v) : -1; return i < 0 ? "" : " medal medal-" + (i + 1); };
+  html += `<p class="hint" style="margin:6px 0 0"><span class="medal-dot m1"></span>金 <span class="medal-dot m2"></span>銀 <span class="medal-dot m3"></span>銅　通貨ペアごとに、各社のスワップが高い順</p>`;
   BROKERS.forEach(b => {
     const urls = BROKER_URLS[b] || {};
     const swHead = urls.swap ? `<a href="${urls.swap}" target="_blank" rel="noopener" style="color:inherit">スワップ</a>` : "スワップ";
