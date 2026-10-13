@@ -576,9 +576,9 @@ function viewTrend(){
   }
   const profit = last.equity - last.principal + realizedPLAsOf(last.date);
   const dEq = prev ? last.equity - prev.equity : null;
-  /* 最上部の大きい1日あたりスワップだけ、今の保有ポジションから計算した最新の値（保有が無いときは記録値）。前週比や有効評価額以下は記録時点のまま */
+  /* 最上部の大きい1日あたりスワップだけ、今の保有ポジションから計算した最新の値（保有が無いときは記録値）。有効評価額以下は記録時点のまま */
   const dailyNow = state.positions.length ? state.positions.reduce((s2,p) => s2 + posDailySwap(p), 0) : last.daily;
-  const dSw = prev ? last.daily - prev.daily : null;
+  const dSw = dailyNow - last.daily;   /* 最上部の前週比は、最新（いまの保有）と最新の記録時点の1日あたりスワップとの差 */
   const yieldPct = last.equity > 0 ? yearly(last) / last.equity * 100 : 0;
   html += `<div class="cert">${rosette()}<div class="inner">
     <p class="cap">1日あたりのスワップ<button class="linkbtn" data-act="swapBreakdown" style="margin-left:8px">内訳</button></p>
