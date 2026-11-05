@@ -1,5 +1,5 @@
 {
- "updatedAt": "2026-11-04T02:29:17.214Z",
+ "updatedAt": "2026-11-05T02:37:16.980Z",
  "brokers": {
   "外為どっとコム": {
    "results": [
@@ -83,46 +83,46 @@
     {
      "pair": "TRY/JPY",
      "side": "buy",
-     "swapPer10k": 26,
-     "buy": 26,
-     "sell": -26,
-     "date": "2026-11-03",
+     "swapPer10k": 27,
+     "buy": 27,
+     "sell": -27,
+     "date": "2026-11-05",
      "unit": 10000
     },
     {
      "pair": "MXN/JPY",
      "side": "buy",
-     "swapPer10k": 15.1,
-     "buy": 151,
-     "sell": -151,
-     "date": "2026-11-03",
+     "swapPer10k": 14,
+     "buy": 140,
+     "sell": -140,
+     "date": "2026-11-05",
      "unit": 100000
     },
     {
      "pair": "ZAR/JPY",
      "side": "buy",
-     "swapPer10k": 15.2,
-     "buy": 152,
-     "sell": -152,
-     "date": "2026-11-02",
+     "swapPer10k": 16,
+     "buy": 160,
+     "sell": -160,
+     "date": "2026-11-05",
      "unit": 100000
     },
     {
      "pair": "HUF/JPY",
      "side": "buy",
-     "swapPer10k": 1.1,
-     "buy": 11,
-     "sell": -11,
-     "date": "2026-11-03",
+     "swapPer10k": 1.2,
+     "buy": 12,
+     "sell": -12,
+     "date": "2026-11-05",
      "unit": 100000
     },
     {
      "pair": "PLN/JPY",
      "side": "buy",
-     "swapPer10k": 30,
-     "buy": 30,
-     "sell": -30,
-     "date": "2026-11-03",
+     "swapPer10k": 29,
+     "buy": 29,
+     "sell": -29,
+     "date": "2026-11-05",
      "unit": 10000
     }
    ],
