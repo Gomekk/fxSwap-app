@@ -1,5 +1,5 @@
 {
- "updatedAt": "2026-11-20T03:35:46.155Z",
+ "updatedAt": "2026-11-21T03:18:44.257Z",
  "brokers": {
   "外為どっとコム": {
    "results": [
@@ -51,28 +51,28 @@
     {
      "pair": "CHF/MXN",
      "side": "sell",
-     "swapPer10k": 209,
-     "buy": -292,
-     "sell": 209,
-     "date": "2026-11-19",
+     "swapPer10k": 206,
+     "buy": -289,
+     "sell": 206,
+     "date": "2026-11-20",
      "unit": 10000
     },
     {
      "pair": "CHF/TRY",
      "side": "sell",
-     "swapPer10k": 1608,
-     "buy": -1828,
-     "sell": 1608,
-     "date": "2026-11-19",
+     "swapPer10k": 1596,
+     "buy": -1815,
+     "sell": 1596,
+     "date": "2026-11-20",
      "unit": 10000
     },
     {
      "pair": "CHF/ZAR",
      "side": "sell",
-     "swapPer10k": 191,
-     "buy": -282,
-     "sell": 191,
-     "date": "2026-11-19",
+     "swapPer10k": 189,
+     "buy": -279,
+     "sell": 189,
+     "date": "2026-11-20",
      "unit": 10000
     }
    ],
@@ -227,28 +227,28 @@
     {
      "pair": "CHF/MXN",
      "side": "sell",
-     "swapPer10k": 252.5,
-     "buy": -252.8,
-     "sell": 252.5,
-     "date": "2026-11-19",
+     "swapPer10k": 250,
+     "buy": -250.2,
+     "sell": 250,
+     "date": "2026-11-20",
      "unit": 10000
     },
     {
      "pair": "CHF/TRY",
      "side": "sell",
-     "swapPer10k": 1488.6,
-     "buy": -1507.2,
-     "sell": 1488.6,
-     "date": "2026-11-19",
+     "swapPer10k": 1481.5,
+     "buy": -1500.1,
+     "sell": 1481.5,
+     "date": "2026-11-20",
      "unit": 10000
     },
     {
      "pair": "CHF/ZAR",
      "side": "sell",
-     "swapPer10k": 193.2,
-     "buy": -193.5,
-     "sell": 193.2,
-     "date": "2026-11-19",
+     "swapPer10k": 191.1,
+     "buy": -191.4,
+     "sell": 191.1,
+     "date": "2026-11-20",
      "unit": 10000
     }
    ],
@@ -307,7 +307,7 @@
      "swapPer10k": 270,
      "buy": -391,
      "sell": 270,
-     "date": "2026-11-19",
+     "date": "2026-11-20",
      "unit": 10000
     },
     {
@@ -316,7 +316,7 @@
      "swapPer10k": 1450,
      "buy": -1850,
      "sell": 1450,
-     "date": "2026-11-19",
+     "date": "2026-11-20",
      "unit": 10000
     },
     {
@@ -325,7 +325,7 @@
      "swapPer10k": 270,
      "buy": -400,
      "sell": 270,
-     "date": "2026-11-19",
+     "date": "2026-11-20",
      "unit": 10000
     }
    ],
